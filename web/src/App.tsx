@@ -5,7 +5,7 @@ import Hero from "@/components/hero"
 import Nav from "@/components/nav"
 import ScrollMoth from "@/components/ui/scroll-moth"
 import TimelineSection from "@/components/timeline-section"
-import TwoWaysSection from "@/components/two-ways-section"
+import WhyWinSection from "@/components/why-win-section"
 import HackathonTracksSection from "@/components/hackathon-tracks-section"
 import LaunchSection from "@/components/launch-section"
 import Footer from "@/components/footer"
@@ -35,8 +35,8 @@ export default function App() {
       {/* 2. Scroll Timeline */}
       <TimelineSection />
 
-      {/* 3. Two ways to see someone */}
-      <TwoWaysSection />
+      {/* 3. What makes the project stand out */}
+      <WhyWinSection />
 
       {/* 4. Hackathon tracks */}
       <HackathonTracksSection />
