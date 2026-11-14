@@ -59,6 +59,8 @@ CSI_MOVE_RATIO = 1.8
 # Weight of the device-free log-likelihood added to a phone's; only used with exactly one phone present.
 FUSE_W = 0.5
 BODY_MAC = "body"
+# Per-phone motion reports kept so the walk between two "I'm here" marks can be cut out (App._finish_mark).
+MOTION_LOG_S = 120.0
 
 
 def fmt_mac(mac: str) -> str:
@@ -167,6 +169,8 @@ class Tracker:
         self.bad_packets = 0
         # mac -> {"mv": 0|1, "st": steps, "hd": compass deg or None, "t": rt} from the phone page (/api/motion).
         self.motion_reports: Dict[str, dict] = {}
+        # mac -> deque of [rt, steps, compass deg or None, moving]; the last MOTION_LOG_S of reports.
+        self.motion_log: Dict[str, deque] = {}
         self.sense = sensing.LinkBuffer()
         self.person = sensing.Person()
         self.body: Optional[dict] = None
@@ -418,10 +422,25 @@ class Tracker:
 
     def set_motion(self, mac: str, mv: int, steps: int, rt: float, hd: Optional[float] = None):
         self.motion_reports[mac] = {"mv": 1 if mv else 0, "st": steps, "hd": hd, "t": rt}
+        log = self.motion_log.setdefault(mac, deque())
+        log.append([rt, steps, hd, 1 if mv else 0])
+        while log and rt - log[0][0] > MOTION_LOG_S:
+            log.popleft()
         cap = self.capture
-        if cap and cap["kind"] == "walk" and cap["phone"] == mac and capture_phase(cap, rt) == "recording":
-            # [t, steps, compass deg, moving]: walkcal reconstructs where the walker actually was from these.
+        if cap and cap["kind"] in ("walk", "mark") and cap["phone"] == mac and capture_phase(cap, rt) == "recording":
+            # [t, steps, compass deg, moving]: walkcal reconstructs where the walker was; marks drop moving stretches.
             cap.setdefault("motion", []).append([round(rt - cap["t0"], 3), steps, hd, 1 if mv else 0])
+
+    def motion_between(self, mac: str, t0: float, t1: float) -> List[list]:
+        """Logged reports with t0 <= rt <= t1 as [rt - t0, steps, compass, moving] (walkcal.leg_fit's shape)."""
+        return [[round(r[0] - t0, 3)] + r[1:] for r in self.motion_log.get(mac, ()) if t0 <= r[0] <= t1]
+
+    def anchor(self, mac: str, x: float, y: float, t: float):
+        """The holder marked where they stand ("mark_anchor" setting). Recorded, so replays do the same."""
+        ctx = self.get_ctx()
+        ph, m = self.phones.get(mac), ctx.get("map")
+        if ph and m and cfg.merged(ctx.get("settings"))["mark_anchor"]:
+            ph.track.pin(m, x, y, t)
 
     def fresh_report(self, mac: str) -> Optional[dict]:
         report = self.motion_reports.get(mac)
@@ -580,8 +599,9 @@ class Tracker:
                 ph.recent.append(point)
 
     def start_capture(self, kind: str, phone: str, x: float, y: float, orientation: str, duration: float, t: float):
-        """Kinds: "calibrate"/"test" stand at (x, y) for duration; "walk" runs until stop_walk() and collects
-        marks [t_rel, x, y] from the phone page (truth between marks is reconstructed by walkcal)."""
+        """Kinds: "calibrate"/"test"/"mark" stand at (x, y) for duration ("mark" also keeps motion reports so moving
+        stretches can be dropped); "walk" runs until stop_walk() and collects marks [t_rel, x, y] from the phone page
+        (truth between marks is reconstructed by walkcal)."""
         self.capture = {"kind": kind, "phone": phone.lower(), "x": x, "y": y, "orientation": orientation,
                         "duration": duration, "t0": t, "samples": [], "marks": [], "stop": False}
 

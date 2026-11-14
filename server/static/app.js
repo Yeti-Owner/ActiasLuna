@@ -204,7 +204,7 @@ function renderSimple() {
   let hint;
   if (unplaced) hint = `${unplaced} board(s) not on the map yet (Setup & debug → Layout).`;
   else if (S.settings?.device_free && !c.df?.empty) hint = "Phone-free tracking is on but the empty room hasn't been recorded (phone page → More, or Setup → Calibrate).";
-  else if (!c.spots.length) hint = "Not calibrated, so positions are rough. Open the phone page (Setup & debug → Calibrate) and do 1 · Walk.";
+  else if (!c.spots.length) hint = "Not calibrated, so positions are rough. Open the phone page (Setup & debug → Calibrate) and mark a few spots with I'm here.";
   else if (ev && ev.loo) hint = `Calibrated with ${c.spots.length} points · a single reading is ~${ft(ev.loo.median_m)} ft off, better when tracked with Motion on`;
   else hint = `Calibrated with ${c.spots.length} point(s).`;
   $("sHint").innerHTML = hint;
@@ -528,9 +528,9 @@ function accuracyHtml(c) {
   const ev = c.evaluation, tests = c.test_summary, m = c.map;
   let html = "";
   if (ev && ev.loo) html += `<b>Calibrated: a single reading is off by ~${ft(ev.loo.median_m)} ft</b> (80% within ${ft(ev.loo.p80_m)} ft; leave-one-out over ${ev.loo.windows} map points). Live tracking with Motion on does better: Settings → Measure on my recordings gives the real figure.<br>`;
-  else html += c.spots.length ? "Need more calibration before accuracy can be estimated.<br>" : "Not calibrated yet: do 1 · Walk on the phone.<br>";
+  else html += c.spots.length ? "Need more calibration before accuracy can be estimated.<br>" : "Not calibrated yet: mark spots with I'm here on the phone.<br>";
   if (ev && ev.model_only) html += `Uncalibrated it would be ~${ft(ev.model_only.median_m)} ft.<br>`;
-  if (tests.windows) html += `<b>Checks: typical error ${ft(tests.median_m)} ft</b>, 80% within ${ft(tests.p80_m)} ft (${tests.windows} windows).<br>`;
+  if (tests.windows) html += `<b>Checks and marks (before each was learned): typical error ${ft(tests.median_m)} ft</b>, 80% within ${ft(tests.p80_m)} ft (${tests.windows} windows).<br>`;
   if (m) {
     const offsets = Object.entries(m.offsets_db).map(([n, v]) => `${esc(nodeLabel(n))} ${v > 0 ? "+" : ""}${v} dB`).join(", ");
     html += `<span class="muted">Radio map: path-loss exponent ${m.eta}, fit error ${m.rms_db ?? "—"} dB, board offsets ${offsets}.</span>`;
@@ -539,16 +539,17 @@ function accuracyHtml(c) {
 }
 
 function spotListHtml(spots) {
-  const walks = {}, rows = [];
+  const groups = {}, rows = [];
   for (const s of spots) {
-    if (s.kind !== "walk") { rows.push(["spot", s]); continue; }
-    if (!walks[s.group]) { walks[s.group] = { n: 0, ori: s.orientation }; rows.push(["walk", s.group]); }
-    walks[s.group].n++;
+    if (s.kind !== "walk" && s.kind !== "mark") { rows.push(["spot", s]); continue; }
+    if (!groups[s.group]) { groups[s.group] = { n: 0, ori: s.orientation, kind: s.kind }; rows.push(["group", s.group]); }
+    groups[s.group].n++;
   }
   return rows.map(([kind, v]) => {
-    if (kind === "walk") {
-      const w = walks[v], ori = w.ori === "hand" ? "" : " · " + esc(w.ori.replace("_", " "));
-      return `<div class="sess"><span>walk · ${w.n} points${ori}</span><button data-delg="${esc(v)}">✕</button></div>`;
+    if (kind === "group") {
+      const w = groups[v], ori = w.ori === "hand" ? "" : " · " + esc(w.ori.replace("_", " "));
+      const what = w.kind === "mark" ? `marked spots · ${w.n}` : `walk · ${w.n} points`;
+      return `<div class="sess"><span>${what}${ori}</span><button data-delg="${esc(v)}">✕</button></div>`;
     }
     return `<div class="sess"><span>(${ft(v.x)}, ${ft(v.y)}) ft · ${esc(v.orientation.replace("_", " "))} · ${v.frames} frames${v.warn.length ? ' <span class="warnbox">⚠</span>' : ""}</span><button data-del="${v.i}">✕</button></div>`;
   }).join("") || '<span class="muted">none</span>';
@@ -558,7 +559,7 @@ let calSig = "";
 function renderCalibration() {
   const pc = S.phone_cal || {};
   if (!pc.port) $("phoneCal").innerHTML = '<span class="warnbox">The phone calibration page is off (port in use?).</span>';
-  else if (S.laptop_ip) $("phoneCal").innerHTML = `On a phone joined to the demo network open <b>${pc.https ? "https" : "http"}://${esc(S.laptop_ip)}:${pc.port}/</b> · PIN <b>${esc(pc.pin)}</b>` +
+  else if (S.laptop_ip) $("phoneCal").innerHTML = `On a phone joined to the demo network open <b>${pc.https ? "https" : "http"}://${esc(S.laptop_ip)}:${pc.port}/</b>` +
     (pc.https ? '<br><span class="muted">The first time, the phone warns the certificate isn\'t trusted: Show Details → visit this website.</span>' : "");
   else $("phoneCal").innerHTML = '<span class="warnbox">Join the laptop to the demo network to use phone calibration.</span>';
 
@@ -574,7 +575,7 @@ function renderCalibration() {
   $("calClear").disabled = !c.spots.length && !(c.tests || []).length;
   const df = c.df || {}, compass = Object.values(df.heading || {}).length;
   $("dfInfo").innerHTML = `Empty room: ${df.empty ? `recorded (${df.links} board-to-board links)` : '<span class="warnbox">not recorded</span>'} · ` +
-    `walk data for phone-free tracking: ${df.walk_windows || 0} windows · compass: ${compass ? "learned" : "not learned yet (walk with Motion on)"}` +
+    `walk data for phone-free tracking: ${df.walk_windows || 0} windows · compass: ${compass ? "learned" : "not learned yet (walk straight between marks with Motion on)"}` +
     (df.stride ? ` · stride ${ft(df.stride)} ft` : "");
   $("emptyGo").disabled = !!S.capture;
 }
@@ -607,7 +608,7 @@ function renderSettings() {
   $("labRun").disabled = lab.state === "running";
   const out = $("labOut");
   if (lab.state === "running") out.textContent = `Replaying ${lab.sessions} recording(s) against ${lab.truths} walks/checks…`;
-  else if (lab.state === "empty") out.innerHTML = '<span class="warnbox">No recording covers a walk or check yet. Do 1 · Walk and 2 · Check on the phone while recording, then try again.</span>';
+  else if (lab.state === "empty") out.innerHTML = '<span class="warnbox">No recording covers a mark, walk or check yet. Mark spots on the phone while recording, then try again.</span>';
   else if (lab.state === "error") out.innerHTML = `<span class="warnbox">Lab failed: ${esc(lab.error)}</span>`;
   else if (lab.state === "done") out.innerHTML = labTable(lab);
   else out.textContent = "";

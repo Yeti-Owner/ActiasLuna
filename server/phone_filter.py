@@ -70,6 +70,8 @@ OFF_SD_MIN = 5.0
 OFF_JUMP = 1.5
 OFF_LEARN_UNC_M = 1.0
 SMOOTH_LAG_S = 3.0
+# A tapped position is good to about a step either way (finger on a small map, where exactly the phone is held).
+PIN_SD_M = 0.25
 
 Window = Callable[[float, float], "rmap.Live"]
 
@@ -109,6 +111,20 @@ class Track:
 
     def reset(self):
         self.__init__()
+
+    def pin(self, m: "rmap.RadioMap", x: float, y: float, t: float, sd: float = PIN_SD_M):
+        """The holder said where they stand: restart the belief as a PIN_SD_M blob there. The learned phone offset
+        is kept; the dwell and the smoothing history restart, so the trail never smooths across the jump."""
+        grid = m.grid
+        if grid is None:
+            return
+        b = np.exp(-0.5 * ((grid.cx - x) ** 2 + (grid.cy - y) ** 2) / sd ** 2)
+        if b.sum() <= 0:
+            return
+        self.belief = b / b.sum()
+        self.t = self.meas_t = t
+        self.still_since = self.anchor = None
+        self._restart_history(t)
 
     def _restart_history(self, t: float):
         self.hist.clear()

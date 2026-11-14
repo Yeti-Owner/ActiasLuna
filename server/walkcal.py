@@ -12,6 +12,9 @@ Spots have the standing-spot shape plus "group" (one phone offset per walk), "bl
 leave-one-out), "eval_s" (window length), "still" (False = averaged while moving, less fading) and "facing" (map angle
 the walker faced so radiomap can undo their body's shadow); see radiomap._fit / _noise / evaluate. Bump VERSION
 whenever the spots produced from the same capture change: luna_server rebuilds stored spots from the raw walks.
+
+Guided walks are the secondary method; "I'm here" marks (luna_server.App._finish_mark) are the primary one. Between
+two marks the person walks freely, so those legs only feed the compass offset and stride (leg_fit, motion_fit).
 """
 from __future__ import annotations
 
@@ -38,6 +41,16 @@ TURN_S = 0.5
 BLOCK_WINDOWS = 4
 TAP_BEFORE_S = 1.5
 TAP_AFTER_S = 1.0
+STRIDE_MIN_M = 0.3
+STRIDE_MAX_M = 1.1
+# Free legs between "I'm here" marks (leg_fit, motion_fit).
+LEG_MIN_M = 0.6
+LEG_MAX_S = 60.0
+LEG_MIN_READINGS = 4
+LEG_STRAIGHT = 0.9
+LEG_MIN_COUNT = 2
+HEADING_MIN_AGREE = 0.7
+WALK_VOTE_M = 5.0
 
 
 def _marks(capture: dict) -> List[list]:
@@ -203,11 +216,11 @@ def walk_spots(capture: dict, walk_id: str) -> List[dict]:
     return spots
 
 
-def stride_fit(capture: dict):
-    """Metres per counted step over legs where the step counter ran (detectors and strides vary per person/phone)."""
+def _stride_legs(capture: dict) -> List[tuple]:
+    """(metres, counted steps) for each straight leg of a walk where the step counter ran."""
     marks, motion = _marks(capture), _motion(capture)
     if len(marks) < 2 or len(motion) < 4:
-        return None
+        return []
 
     def steps_near(t):
         nearest = min(motion, key=lambda row: abs(row[0] - t))
@@ -221,12 +234,83 @@ def stride_fit(capture: dict):
         if a is None or b is None or b <= a:
             continue
         legs.append((math.hypot(x1 - x0, y1 - y0), b - a))
+    return legs
+
+
+def _stride(legs: List[tuple]) -> Optional[float]:
     # A leg where the counter missed most steps would stretch the stride: prefer legs with plausible step lengths.
-    plausible = [(d, n) for d, n in legs if 0.3 <= d / n <= 1.1] or legs
+    plausible = [(d, n) for d, n in legs if STRIDE_MIN_M <= d / n <= STRIDE_MAX_M] or legs
     steps = sum(n for _, n in plausible)
     if steps < 10:
         return None
     return min(1.0, max(0.4, sum(d for d, _ in plausible) / steps))
+
+
+def stride_fit(capture: dict):
+    """Metres per counted step over legs where the step counter ran (detectors and strides vary per person/phone)."""
+    return _stride(_stride_legs(capture))
+
+
+def leg_fit(leg: dict) -> Optional[dict]:
+    """What one walk between two "I'm here" marks teaches: compass offset and steps, or None.
+
+    leg: {"phone", "x0", "y0", "x1", "y1", "motion": [[t, steps, compass deg, moving], ...]}. The person picks their
+    own way, so a leg counts only if the compass held one direction while moving (agreement >= LEG_STRAIGHT): then
+    they walked straight from mark to mark and the leg's angle minus the compass is the room offset, as in heading_fit.
+    The first and last moving readings are dropped (turning towards the target, turning to look at the phone).
+    """
+    dx, dy = leg["x1"] - leg["x0"], leg["y1"] - leg["y0"]
+    dist = math.hypot(dx, dy)
+    rows = sorted(r for r in leg.get("motion") or [] if r[1] is not None)
+    if dist < LEG_MIN_M or len(rows) < 2:
+        return None
+    moving = [r for r in rows if len(r) > 3 and r[3] and r[2] is not None][1:-1]
+    if len(moving) < LEG_MIN_READINGS:
+        return None
+    c = sum(math.cos(math.radians(r[2])) for r in moving)
+    s = sum(math.sin(math.radians(r[2])) for r in moving)
+    agree = math.hypot(c, s) / len(moving)
+    if agree < LEG_STRAIGHT:
+        return None
+    return {"phone": leg["phone"], "offset": math.atan2(dy, dx) - math.atan2(s, c), "agree": agree, "dist": dist,
+            "steps": rows[-1][1] - rows[0][1]}
+
+
+def motion_fit(walks: List[dict], legs: List[dict]):
+    """({mac: [compass offset rad, agreement]}, stride m/step or None) from guided walks and mark legs together.
+
+    Each source votes with weight metres walked x its own agreement; the result's agreement is how well they agree
+    with each other. A phone needs a walk or LEG_MIN_COUNT straight legs, and agreement over HEADING_MIN_AGREE: indoor
+    magnetic fields bend near steel, so one leg alone can be badly off.
+    """
+    votes: dict = {}
+    stride_legs: List[tuple] = []
+    for walk in walks:
+        fit = heading_fit(walk)
+        straight = _stride_legs(walk)
+        stride_legs.extend(straight)
+        if fit and fit[1] > 0.5:
+            metres = sum(d for d, _ in straight) or WALK_VOTE_M
+            votes.setdefault(walk["phone"], []).append((fit[0], metres * fit[1], True))
+    for leg in legs:
+        fit = leg_fit(leg)
+        if not fit:
+            continue
+        votes.setdefault(fit["phone"], []).append((fit["offset"], fit["dist"] * fit["agree"], False))
+        if fit["steps"] > 0:
+            stride_legs.append((fit["dist"], fit["steps"]))
+    heading = {}
+    for mac, rows in votes.items():
+        if not any(walked for *_, walked in rows) and len(rows) < LEG_MIN_COUNT:
+            continue
+        c = sum(w * math.cos(a) for a, w, _ in rows)
+        s = sum(w * math.sin(a) for a, w, _ in rows)
+        total = sum(w for _, w, _ in rows)
+        agree = math.hypot(c, s) / total if total else 0.0
+        if agree >= HEADING_MIN_AGREE:
+            heading[mac] = [round(math.atan2(s, c), 4), round(agree, 3)]
+    stride = _stride(stride_legs) if stride_legs else None
+    return heading, (round(stride, 3) if stride else None)
 
 
 def raw_walk(capture: dict, walk_id: str) -> dict:

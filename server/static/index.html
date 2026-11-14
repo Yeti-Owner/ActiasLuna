@@ -79,9 +79,11 @@
     <div id="tCal" class="tab hidden">
       <div id="phoneCal" class="small callout"></div>
       <ol class="small steps">
-        <li>On a phone joined to the demo network, open the address above and enter the PIN. Tap <b>Turn on motion</b>.</li>
-        <li><b>1 · Walk</b>: follow the numbered dots (roughly two minutes). Doing it twice helps.</li>
-        <li><b>2 · Check</b>: stand on each blue square for 8 seconds to measure the real error.</li>
+        <li>On a phone joined to the demo network, open the address above.</li>
+        <li>Stand somewhere, tap that spot on the phone's map and press <b>I'm here</b> (hold still 8 s). Each mark first
+          measures how far off the map was there, then teaches it that spot.</li>
+        <li>Walk straight to the next amber ring and repeat until the room is covered. The walks in between teach the
+          compass and stride. <span class="muted">(A guided walk is under More.)</span></li>
       </ol>
       <h4>Accuracy</h4>
       <div id="calQual" class="small"></div>
@@ -96,7 +98,7 @@
     <div id="tSet" class="tab hidden">
       <div id="setList"></div>
       <h4>Which settings actually help?</h4>
-      <p class="small muted">Walk and do the checks on the phone while recording (on by default). This replays those
+      <p class="small muted">Mark spots on the phone while recording (on by default). This replays those
         recordings with each setting flipped and scores them against where you really were. About a minute.</p>
       <div class="row"><button id="labRun" class="primary">Measure on my recordings</button></div>
       <div id="labOut" class="small"></div>

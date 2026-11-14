@@ -1,7 +1,8 @@
 """Settings lab: replay recorded sessions with each setting flipped and score raw estimates against ground truth.
 
 Ground truth comes from the current calibration set:
-  - check / test captures: the phone stood at a known spot for the capture's duration;
+  - check / test captures and "I'm here" marks: the phone stood at a known spot for the capture's duration. A mark
+    also trained the map, so it is scored on a map without its own spot ("block");
   - walks: positions reconstructed between taps, scored on a map built without that walk's own spots, so a walk is
     never graded on its own training data.
 Runs in worker processes (pure functions, picklable inputs). Truth only counts while the session was recording.
@@ -27,7 +28,8 @@ def truths(calib: dict) -> List[dict]:
     for test in calib.get("tests", []):
         if "t" in test and test.get("phone"):
             out.append({"kind": "still", "phone": test["phone"], "t0": test["t"],
-                        "t1": test["t"] + test.get("duration", 8), "pts": [(test["t"], test["x"], test["y"])]})
+                        "t1": test["t"] + test.get("duration", 8), "pts": [(test["t"], test["x"], test["y"])],
+                        "block": test.get("block")})
     groups: Dict[str, dict] = {}
     # Raw walks carry motion-aware truth (walkcal.truth); files without them only have walk spots.
     for walk in calib.get("walks", []):
@@ -61,10 +63,15 @@ def _truth_at(truth: dict, t: float):
     return None
 
 
-def _maps(layout, spots, links, blocked, groups, holder=False):
+def _maps(layout, spots, links, blocked, groups, blocks=(), holder=False):
+    """Keyed None (every spot), ("group", g) without walk g, ("block", b) without the spots of mark b."""
     maps = {None: rmap.RadioMap(layout, spots, links, blocked, holder)}
     for group in groups:
-        maps[group] = rmap.RadioMap(layout, [s for s in spots if s.get("group") != group], links, blocked, holder)
+        maps[("group", group)] = rmap.RadioMap(layout, [s for s in spots if s.get("group") != group], links, blocked,
+                                               holder)
+    for block in blocks:
+        maps[("block", block)] = rmap.RadioMap(layout, [s for s in spots if s.get("block") != block], links, blocked,
+                                               holder)
     return maps
 
 
@@ -110,14 +117,18 @@ def run_variant(job: dict) -> dict:
     blocked = job["blocked"] if st["furniture"] else []
     all_truths = job["truths"]
     walk_groups = {t["group"] for t in all_truths if t["kind"] == "walk"}
-    maps = _maps(job["layout"], job["spots"], job["links"], blocked, walk_groups, st["holder_body"])
+    held = {t["block"] for t in all_truths if t["kind"] == "still" and t.get("block")}
+    maps = _maps(job["layout"], job["spots"], job["links"], blocked, walk_groups, held, st["holder_body"])
     out = {"still": [], "jitter": [], "walk": [], "trail": [], "checks": []}
     for path, span in job["sessions"]:
         _, lines = load_session(path)
         for truth in all_truths:
             if not (span[0] <= truth["t0"] and truth["t1"] <= span[1]):
                 continue
-            m = maps[truth.get("group")] if truth["kind"] == "walk" else maps[None]
+            if truth["kind"] == "walk":
+                m = maps[("group", truth["group"])]
+            else:
+                m = maps[("block", truth["block"]) if truth.get("block") else None]
             _score_truth(job, st, m, truth, lines, out)
     return {"name": job["name"], "key": job.get("key"), **out}
 
