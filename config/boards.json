@@ -1,0 +1,7 @@
+{
+  "boards": [
+    {"label": "A", "role": "AP", "base_mac": "98c377b436b0", "chip": "ESP32-S3, 16MB flash, 8MB PSRAM"},
+    {"label": "B", "role": "RX", "base_mac": "98c377b51cd4", "chip": "ESP32-S3, 16MB flash, 8MB PSRAM"},
+    {"label": "C", "role": "RX", "base_mac": "98c377b5e040", "chip": "ESP32-S3, 16MB flash, 8MB PSRAM"}
+  ]
+}

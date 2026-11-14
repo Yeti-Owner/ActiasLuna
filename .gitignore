@@ -16,7 +16,7 @@ mesh/
 # Secrets (regenerate with tools/gen_secrets.py)
 config/network.json
 config/certs/
-firmware/moth_node/main/moth_secrets.h
+firmware/luna_node/main/luna_secrets.h
 *.pem
 *.key
 .env
