@@ -13,7 +13,7 @@ import { runAgent } from './chert-rooms.mjs';
 import { greetOnBridgeReady } from './greet.mjs';
 import { instructionsFor, todayInTz, tools } from './moth-tools.mjs';   // room-history tools (Vultr API)
 
-const greeting = 'Greet the caller in one short sentence: say you are Moth, the AI for their room, and that they can ask who has been in it.';
+const greeting = 'Greet the caller in one short sentence that begins exactly with "Hey, I\'m Actias": say you are the AI for their room and that they can ask who has been in it.';
 
 const agent = defineAgent({
   entry: async ctx => {
