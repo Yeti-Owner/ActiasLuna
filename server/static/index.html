@@ -9,12 +9,11 @@
 </head>
 <body>
 <header>
-  <div class="brand"><span class="glyph">◐</span> ActiasLuna <span id="viewBadge" class="badge live">LIVE</span></div>
+  <div class="brand"><span class="glyph">◐</span> ActiasLuna</div>
   <div id="hdrInfo" class="muted"></div>
   <div class="spacer"></div>
   <span id="recBadge" class="badge"></span>
   <button id="dimTog">3D view</button>
-  <button id="viewTog" class="adv hidden">Show replay</button>
   <button id="modeTog" class="quiet">Advanced</button>
 </header>
 <main>
@@ -44,12 +43,6 @@
       <span><i class="lg weak"></i>rough (under 3 boards)</span>
       <span><i class="lg stale"></i>silent for over 3 s</span>
       <span>shaded disc = uncertainty · map units are feet</span>
-    </div>
-    <div id="replayBar" class="hidden">
-      <button id="rpPause">Pause</button>
-      <select id="rpSpeed"><option>0.5</option><option selected>1</option><option>2</option><option>5</option><option>20</option></select>×
-      <progress id="rpProg" max="1" value="0"></progress><span id="rpTime" class="small"></span>
-      <button id="rpStop">End replay</button>
     </div>
   </section>
 
@@ -98,7 +91,7 @@
     <div id="tSet" class="tab hidden">
       <div id="setList"></div>
       <h4>Which settings actually help?</h4>
-      <p class="small muted">Mark spots on the phone while recording (on by default). This replays those
+      <p class="small muted">Mark spots on the phone while recording (on by default). This re-runs those
         recordings with each setting flipped and scores them against where you really were. About a minute.</p>
       <div class="row"><button id="labRun" class="primary">Measure on my recordings</button></div>
       <div id="labOut" class="small"></div>

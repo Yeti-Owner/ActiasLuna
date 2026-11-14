@@ -12,7 +12,7 @@ Technique 1 - decoys: many fake phones appear at once, so the real person is jus
 Technique 2 - randomization: the target changes its own MAC every few seconds, so its trail keeps breaking and
 can't be followed over time. This is exactly what modern iOS/Android do ("Private Wi-Fi Address").
 
-Standard library only. Stepped with the shared timestamp, never the wall clock, so replays match.
+Standard library only. Stepped with the shared timestamp, never the wall clock, so re-run recordings match.
 """
 
 import random

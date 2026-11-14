@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 
 import radiomap as rm  # noqa: E402
-from replay import feed, load_session  # noqa: E402
+from recording import feed, load_session  # noqa: E402
 from tracker import Tracker  # noqa: E402
 
 FT = rm.FT

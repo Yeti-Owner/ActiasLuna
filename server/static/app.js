@@ -13,7 +13,7 @@ const GREY = "#7a819c";
 
 // S: latest snapshot from the server (SSE, ~4 Hz). L: the layout on screen; follows S.layout unless editing, which
 // means L holds unsaved changes (started by the first drag, place or typed number; ended by save or undo).
-let S = null, L = null, view = "live", stream = null;
+let S = null, L = null, stream = null;
 let editing = false, selectedPhone = null, selectedCorner = -1, dragging = null, placing = null, plan = null;
 let tab = "tLayout", simple = true, show3d = false, v3 = null, SCAN = null, scanLoaded = false, autoOpened = false;
 const colors = {};
@@ -41,7 +41,7 @@ async function api(path, body) {
 
 function connect() {
   if (stream) stream.close();
-  stream = new EventSource("/api/events?view=" + view);
+  stream = new EventSource("/api/events");
   stream.onmessage = (ev) => {
     S = JSON.parse(ev.data);
     mergeBody(S);
@@ -131,24 +131,12 @@ function applyMode() {
 
 function render() {
   if (!S) return;
-  const live = view === "live", rp = S.replay;
-  $("viewBadge").textContent = live ? "LIVE" : "REPLAY";
-  $("viewBadge").className = "badge " + (live ? "live" : "replay");
   const net = S.ssid ? `network “${S.ssid}”` : "no config/network.json";
   $("hdrInfo").textContent = `${net} · laptop ${S.laptop_ip ? "on the demo network" : "NOT on the demo network"}`;
   $("recBadge").textContent = "● REC";
   $("recBadge").className = "badge rec" + (S.recording.on ? "" : " hidden");
   $("recTog").textContent = S.recording.on ? "Stop recording" : "Start recording";
   $("recInfo").textContent = S.recording.on ? `${S.recording.file} (${S.recording.packets} packets)` : "";
-  $("viewTog").textContent = live ? "Show replay" : "Back to live";
-  $("replayBar").classList.toggle("hidden", !(!live && rp));
-  if (rp && !live) {
-    const span = rp.t1 - rp.t0, at = rp.pos - rp.t0;
-    $("rpProg").value = at / Math.max(1e-6, span);
-    $("rpTime").textContent = `${at.toFixed(0)} / ${span.toFixed(0)} s ${rp.state === "finished" ? "(end)" : ""} · ${rp.file}`;
-    $("rpPause").textContent = rp.state === "paused" ? "Play" : "Pause";
-    $("rpPause").disabled = rp.state === "finished";
-  }
   renderLayoutPanel();
   if (simple) { renderSimple(); renderSetup(); renderTuning(); }
   else { renderTables(); renderCalibration(); renderSettings(); }
@@ -426,6 +414,24 @@ function drawTrail(points, color) {
   ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineCap = "butt";
 }
 
+// Debug: each board's own distance guess from est.rings (radiomap.RadioMap.rings), [best, near, far] in metres.
+// Shaded band = +-1 sd, dashed circle = best guess. Where the bands overlap is plain triangulation's answer.
+const RING_COLORS = ["#ff7a90", "#6fc3ff", "#ffd166", "#9be89b", "#c49bff"];
+function drawRings(p) {
+  const rings = p.est?.rings;
+  if (!rings || p.est.kind === "stale") return;
+  Object.keys(L.receivers).sort().forEach((id, i) => {
+    const r = rings[id], b = L.receivers[id];
+    if (!r) return;
+    const X = toX(b.x), Y = toY(b.y), c = RING_COLORS[i % RING_COLORS.length], k = view2d.k;
+    ctx.beginPath(); ctx.arc(X, Y, r[2] * k, 0, 2 * Math.PI); ctx.arc(X, Y, r[1] * k, 0, 2 * Math.PI, true);
+    ctx.fillStyle = c + "22"; ctx.fill("evenodd");
+    ctx.beginPath(); ctx.arc(X, Y, r[0] * k, 0, 2 * Math.PI);
+    ctx.strokeStyle = c + "cc"; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+    label(`${nodeLabel(id)} ${ft(r[0])} ft`, X + r[0] * k * Math.SQRT1_2 + 4, Y - r[0] * k * Math.SQRT1_2, "11px sans-serif", c);
+  });
+}
+
 function drawPerson(p, now) {
   const color = colorFor(p.mac), e = p.est, m = shown[p.mac];
   const pts = p.trail.map((q) => [toX(q[1]), toY(q[2]), q[4]]);
@@ -458,6 +464,7 @@ function drawMap() {
   drawPlan();
   drawBoards();
   const now = performance.now() / 1000;
+  for (const p of S?.phones || []) drawRings(p);
   for (const p of S?.phones || []) drawPerson(p, now);
   if (placing) label(`click the map where board ${nodeLabel(placing.id)} is`, 10, 18, "13px sans-serif", "#e6b24c");
 }
@@ -465,7 +472,7 @@ window.addEventListener("resize", drawMap);
 
 // One animation loop for the 2D map: eases markers toward the newest estimate (time constant EASE_S) and redraws.
 // The server already smooths positions; this only hides the 4 Hz steps.
-const EASE_S = 0.18;
+const EASE_S = 0.1;
 let lastFrame = performance.now();
 function frame(t) {
   const dt = Math.min(0.1, (t - lastFrame) / 1000);
@@ -695,7 +702,7 @@ function renderCalibration() {
 $("emptyGo").onclick = () => api("/api/empty/start", {});
 $("calClear").onclick = $("sCalClear").onclick = () => { if (confirm("Delete every walk, point and check for this room?")) api("/api/calib/clear", {}); };
 
-// Settings: live switches (server/settings.py) plus the lab, which replays recordings with each one flipped.
+// Settings: live switches (server/settings.py) plus the lab, which re-runs recordings with each one flipped.
 let setSig = "";
 function labTable(lab) {
   const base = lab.rows[0], f = (m) => (m == null ? "—" : ft(m) + " ft");
@@ -720,7 +727,7 @@ function renderSettings() {
   document.querySelectorAll("[data-set]").forEach((b) => (b.onchange = () => api("/api/settings", { key: b.dataset.set, on: b.checked })));
   $("labRun").disabled = lab.state === "running";
   const out = $("labOut");
-  if (lab.state === "running") out.textContent = `Replaying ${lab.sessions} recording(s) against ${lab.truths} walks/checks…`;
+  if (lab.state === "running") out.textContent = `Re-running ${lab.sessions} recording(s) against ${lab.truths} walks/checks…`;
   else if (lab.state === "empty") out.innerHTML = '<span class="warnbox">No recording covers a mark, walk or check yet. Mark spots on the phone while recording, then try again.</span>';
   else if (lab.state === "error") out.innerHTML = `<span class="warnbox">Lab failed: ${esc(lab.error)}</span>`;
   else if (lab.state === "done") out.innerHTML = labTable(lab);
@@ -732,10 +739,6 @@ async function loadSessions() {
   const list = await (await fetch("/api/sessions")).json();
   $("sessList").innerHTML = list.map((s) => `<div class="sess"><span class="mono">${esc(s.file)} <span class="muted">${(s.bytes / 1024).toFixed(0)} kB</span></span>
     <button data-del="${esc(s.file)}">Delete</button></div>`).join("") || "none";
-  document.querySelectorAll("#sessList [data-rp]").forEach((b) => (b.onclick = async () => {
-    await api("/api/replay/start", { file: b.dataset.rp, speed: +$("rpSpeed").value });
-    view = "replay"; connect();
-  }));
   document.querySelectorAll("#sessList [data-del]").forEach((b) => (b.onclick = async () => {
     if (!confirm("Delete " + b.dataset.del + "?")) return;
     await api("/api/session/delete", { file: b.dataset.del });
@@ -743,10 +746,6 @@ async function loadSessions() {
   }));
 }
 $("recTog").onclick = async () => { await api("/api/record", { on: !S.recording.on }); setTimeout(loadSessions, 300); };
-$("rpPause").onclick = () => S && S.replay && api("/api/replay/control", { paused: !S.replay.paused });
-$("rpSpeed").onchange = () => api("/api/replay/control", { speed: +$("rpSpeed").value });
-$("rpStop").onclick = async () => { await api("/api/replay/stop", {}); view = "live"; connect(); };
-$("viewTog").onclick = () => { view = view === "live" ? "replay" : "live"; connect(); };
 $("dimTog").onclick = () => {
   show3d = !map3d();
   remember("luna3d", show3d ? "1" : "0");

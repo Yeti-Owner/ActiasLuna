@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import math
 
-SMOOTH_MIN_CUTOFF_HZ = 0.3
-SMOOTH_BETA = 2.0
+SMOOTH_MIN_CUTOFF_HZ = 0.6
+SMOOTH_BETA = 4.0
 SMOOTH_D_CUTOFF_HZ = 1.0
 SMOOTH_UNC_ALPHA = 0.15
 SMOOTH_RESET_GAP_S = 10.0

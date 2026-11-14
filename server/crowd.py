@@ -11,7 +11,7 @@ wander near the real person. It is cosmetic only:
 Toggled over UDP by {"t": "crowd", "on": 0|1} or {"t": "crowd", "toggle": 1}; the Uno Q white button sends the toggle
 through tools/unoq_button_adb.py.
 
-Standard library only. Stepped from the tracker with the shared timestamp, never the wall clock, so replays match.
+Standard library only. Stepped from the tracker with the shared timestamp, never the wall clock, so re-run recordings match.
 """
 
 import enum

@@ -62,3 +62,4 @@ desktop.ini
 # Frontend (web/): deps and build output
 node_modules/
 web/static/
+config/cloud.json

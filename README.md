@@ -105,10 +105,9 @@ recordings and accuracy numbers are untouched (`crowd.py`, `App._jam`).
 - `firmware/mac_randomizer/mac_randomizer.ino` does it over the air: a spare ESP32 joins the demo network and changes
   its own MAC every few seconds, so the dashboard keeps seeing a "new" phone. Set the SSID and password at the top.
 
-## Tests and checks
+## Checks
 
 ```bash
-python -m pytest -q tests                        # crowd, MAC sim, room parsing
 python tools/preview_room.py data/scan/room.json # decoys placed in the scanned room, in the terminal
 python tools/sim_crowd.py                        # the crowd alone, in the terminal
 ```

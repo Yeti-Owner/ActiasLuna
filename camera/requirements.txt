@@ -1,4 +1,0 @@
-# Only the camera process needs OpenCV; the server side (fusion.py, homography.py) needs numpy alone.
-numpy>=1.24
-# OpenCV 5 removed the HOG person detector, so stay on 4.x.
-opencv-python>=4.8,<5

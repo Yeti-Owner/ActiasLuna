@@ -22,10 +22,11 @@ import numpy as np
 import radiomap as rmap
 
 # Information rate while moving: fraction of a full likelihood per second of new readings (successive windows share
-# the map's local error, so they are not independent).
-K_RATE = 1.2
-MOVING_SPEED = 0.6
-UNKNOWN_SPEED = 0.6
+# the map's local error, so they are not independent). MOVING_SPEED is the belief's spread per second while walking; set
+# below walking pace (about 1.2 m/s) the estimate trails the walker.
+K_RATE = 2.0
+MOVING_SPEED = 1.0
+UNKNOWN_SPEED = 0.8
 # Standing still: the belief held at the stop spreads by SD_STILL * sqrt(seconds) (drift, small shuffles) and is
 # multiplied once by the likelihood of the dwell's readings over at most STILL_WIN_S.
 SD_STILL = 0.08

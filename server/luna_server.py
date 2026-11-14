@@ -1,7 +1,7 @@
 """ActiasLuna laptop server (Python 3.10+, numpy).
 
 Threads: udp_loop (ingest), subscribe_loop (LUNA_SUB to boards every second), tick_loop (estimator at 4 Hz), HTTP
-handlers, plus replay and evaluation workers. All shared state is guarded by App.lock. The dashboard binds to
+handlers, plus lab and evaluation workers. All shared state is guarded by App.lock. The dashboard binds to
 127.0.0.1 only; the phone page answers only the demo subnet. LUNA_DATA overrides the data directory.
 """
 from __future__ import annotations
@@ -19,11 +19,9 @@ import threading
 import time
 import traceback
 import zipfile
-from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(1, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -35,11 +33,10 @@ import radiomap as rmap  # noqa: E402
 import sensing  # noqa: E402
 import settings as cfg  # noqa: E402
 import walkcal  # noqa: E402
-from replay import TICK_S, Replay, load_session  # noqa: E402
+from recording import TICK_S  # noqa: E402
 from crowd import Crowd, jam_offset  # noqa: E402
 from room import Room  # noqa: E402
 from tracker import Status, Tracker, capture_phase, fmt_mac  # noqa: E402
-from camera import pose as campose  # noqa: E402  (tracker put the repo root on sys.path)
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get("LUNA_DATA", ROOT / "data"))
@@ -55,6 +52,11 @@ EMPTY_S = 30.0
 SCAN_MATCH_M = 0.3
 SCAN_MAX_BYTES = 300 << 20
 BUSY = (409, "a capture is already running")
+# Phone keep-alive pings (static/phone.js PING_MS): per-IP token bucket so a page left open, or several tabs, can't
+# load the server. Pings never take App.lock; the body is read and dropped.
+PING_MAX_HZ = 60.0
+PING_BURST = 20.0
+PING_MAX_BYTES = 4096
 # "I'm here": MARK_DELAY_S lets the hand settle after the tap, then MARK_S of standing readings. Stretches the phone
 # reports moving (MARK_MOVE_PAD_S either side, reports lag the motion) are dropped; under MARK_MIN_S left, or under 2
 # boards with MARK_MIN_FRAMES, the mark is refused rather than training the map on a wrong position.
@@ -67,19 +69,6 @@ MARK_MIN_FRAMES = 10
 # median over the mark are that, not the spot, and are dropped.
 MARK_SHADOW_DB = 6.0
 LEGS_KEEP = 400
-CAMERA_CAL = DATA / "camera" / "calibration.json"
-# Laptop camera upkeep (App._camera_upkeep): start camera/luna_camera.py when a placement exists and nothing has sent
-# for CAMERA_START_S (retry after CAMERA_RETRY_S); refit the lid pitch every CAMERA_REFINE_S from whole-body sightings.
-CAMERA_START_S = 5.0
-CAMERA_RETRY_S = 60.0
-CAMERA_REFINE_S = 20.0
-CAMERA_SIGHTINGS = 600
-# A sighting for the pitch fit: feet and head top of one confident whole-body or moving box, head above the feet.
-CAMERA_SIGHT_SCORE = 0.5
-CAMERA_SIGHT_DU = 0.05
-# camera/luna_camera.py serves its annotated picture here (luna_camera.PREVIEW_PORT); /api/camera/preview.jpg relays it
-# so the /camera page needs no second origin. Both ends stay on 127.0.0.1.
-CAMERA_PREVIEW_PORT = 8093
 
 FT = rmap.FT
 DEFAULT_LAYOUT = {
@@ -175,13 +164,6 @@ class App:
         self.blocked = []
         self.scan_objects = []
         self._route_cache = (None, None)
-        self._camera_cache = (None, None)
-        self.cam_sightings: deque = deque(maxlen=CAMERA_SIGHTINGS)
-        self.cam_aspect = None
-        self.cam_proc = None
-        self._cam_started = -math.inf
-        self._cam_checked = 0.0
-        self._cam_refined = 0.0
         self.map = None
         self.df_map = None
         self.map_links = {}
@@ -196,7 +178,6 @@ class App:
         self.rec_file = None
         self.rec_path = None
         self.rec_count = 0
-        self.replay = None
         self.targets = []
         for item in (args.targets or "").split(","):
             item = item.strip()
@@ -205,7 +186,7 @@ class App:
                 self.targets.append((host, int(port)))
         self.known_nodes = set()
         self.sock = None
-        self._snap_cache = {}
+        self._snap_cache = (-math.inf, "")
         self.phone_port = None
         self.phone_https = False
         self._plan_cache = (None, [])
@@ -353,120 +334,10 @@ class App:
     def _headings(self) -> dict:
         return {mac: h[0] for mac, h in self.calib.get("heading", {}).items()}
 
-    def camera_calib(self):
-        """CAMERA_CAL from the /camera page (camera/pose.py) or camera/calibrate.py, or None. Re-read when the file
-        changes; the same dict is returned until then, so the tracker only refits on a real change."""
-        path = CAMERA_CAL
-        try:
-            mtime = path.stat().st_mtime
-        except OSError:
-            mtime = None
-        if self._camera_cache[0] != mtime:
-            calib = read_json(path, None) if mtime is not None else None
-            self._camera_cache = (mtime, calib if isinstance(calib, dict) else None)
-        return self._camera_cache[1]
-
-    def _write_camera(self, record):
-        write_json(CAMERA_CAL, record)
-        self._camera_cache = (None, None)
-
-    def place_camera(self, body: dict):
-        """The /camera page: where the laptop is, a floor point it looks towards and its height."""
-        p = campose.make_pose(finite(body["x"]), finite(body["y"]), finite(body["look_x"]), finite(body["look_y"]),
-                              finite(body.get("height", 1.0)))
-        self._write_camera(campose.calibration(p, self.layout["polygon"], self.cam_aspect))
-        self.cam_sightings.clear()
-        self._cam_started = -math.inf
-        self._note("laptop camera placed")
-        return self.camera_info()
-
-    def clear_camera(self):
-        if CAMERA_CAL.exists():
-            CAMERA_CAL.unlink()
-        self._camera_cache = (None, None)
-        if self.cam_proc and self.cam_proc.poll() is None:
-            self.cam_proc.terminate()
-        self.cam_proc = None
-        self._note("laptop camera removed")
-        return self.camera_info()
-
-    def camera_info(self) -> dict:
-        """For the /camera page: counts and the room only, never where the camera sees anyone."""
-        cal = self.camera_calib() or {}
-        cam = self.live.camera
-        return {"pose": cal.get("pose"), "manual": bool(cal) and cal.get("source") != "pose",
-                "status": cam.status(self.live.now) if cam.last_rt is not None else None,
-                "sightings": len(self.cam_sightings), "started": self.cam_proc is not None,
-                "help": bool(self.settings["camera"]),
-                "polygon": self.layout["polygon"], "receivers": self.layout.get("receivers", {}),
-                "objects": [{"label": o.get("label"), "footprint": o["footprint"]} for o in self.scan_objects]}
-
-    def _camera_sightings(self, pkt: dict):
-        """Whole-body sightings from a `cam` packet for campose.refine."""
-        w, h = pkt.get("w"), pkt.get("h")
-        if not (isinstance(w, (int, float)) and isinstance(h, (int, float)) and w > 0 and h > 0):
-            return
-        self.cam_aspect = w / h
-        for d in pkt.get("det") or []:
-            try:
-                if d.get("k") not in ("body", "moving") or float(d.get("s", 0)) < CAMERA_SIGHT_SCORE:
-                    continue
-                u, v, hu, hv = (float(d[k]) for k in ("u", "v", "hu", "hv"))
-            except (KeyError, TypeError, ValueError, AttributeError):
-                continue
-            if hv < v and abs(u - hu) < CAMERA_SIGHT_DU:
-                self.cam_sightings.append((u, v, hu, hv, w / h))
-
-    def _camera_upkeep(self, now: float):
-        """Under self.lock from tick_loop: start the camera sender, keep the pose's frame shape and pitch current."""
-        if now - self._cam_checked < 1.0:
-            return
-        self._cam_checked = now
-        cal = self.camera_calib()
-        if not cal:
-            return
-        cam = self.live.camera
-        silent = cam.last_rt is None or now - cam.last_rt > CAMERA_START_S
-        allowed = not self.args.targets and not getattr(self.args, "no_camera", False)
-        running = self.cam_proc is not None and self.cam_proc.poll() is None
-        if silent and allowed and not running and now - self._cam_started > CAMERA_RETRY_S:
-            self._cam_started = now
-            self._start_camera()
-        p = cal.get("pose")
-        if not p:
-            return
-        if self.cam_aspect and abs(self.cam_aspect - cal.get("aspect", 0)) > 0.02:
-            self._write_camera(campose.calibration(p, self.layout["polygon"], self.cam_aspect))
-            return
-        if now - self._cam_refined >= CAMERA_REFINE_S:
-            self._cam_refined = now
-            better = campose.refine(p, list(self.cam_sightings))
-            if better:
-                self._write_camera(campose.calibration(better, self.layout["polygon"], self.cam_aspect))
-                self._note(f"laptop camera tilt refined: {p['pitch_deg']:.1f} -> {better['pitch_deg']:.1f} deg "
-                           f"({len(self.cam_sightings)} sightings)")
-
-    def _start_camera(self):
-        CAMERA_CAL.parent.mkdir(parents=True, exist_ok=True)
-        log = (CAMERA_CAL.parent / "luna_camera.log").open("a", encoding="utf-8")
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        try:
-            self.cam_proc = subprocess.Popen(
-                [sys.executable, str(ROOT / "camera" / "luna_camera.py"), "--port", str(self.args.udp_port),
-                 "--preview-port", str(CAMERA_PREVIEW_PORT)],
-                stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags)
-            self._note("laptop camera started")
-        except OSError as exc:
-            self._note(f"laptop camera could not start: {exc}")
-        finally:
-            log.close()
-
     def ctx(self) -> dict:
         return {"map": self.map, "settings": self.settings, "df": self.df_map, "layout": self.layout,
                 "objects": [o["footprint"] for o in self.scan_objects], "heading": self._headings(),
-                "stride": self.calib.get("stride"), "camera": self.camera_calib(),
-                # With heights: tall ones hide people from the laptop camera (camera.fusion.set_scene).
-                "scan_objects": self.scan_objects}
+                "stride": self.calib.get("stride")}
 
     def start_spot(self, body: dict, phone: str, default_s: float, delay: float):
         """Standing calibrate/test capture from a request body; the caller checked nothing is running."""
@@ -524,7 +395,7 @@ class App:
             return
         jobs = lab.jobs(dict(self.settings), self.layout, list(self.calib["spots"]), dict(self.map_links),
                         planner.blocked(self.scan_objects), truth_list, sessions, self._headings(),
-                        self.calib.get("stride"), self.camera_calib())
+                        self.calib.get("stride"))
         self.lab = {"state": "running", "started": time.time(), "sessions": len(sessions), "truths": len(truth_list)}
 
         def worker():
@@ -767,22 +638,6 @@ class App:
         if self.rec_count % 50 == 0 and self.rec_file:
             self.rec_file.flush()
 
-    def start_replay(self, fname: str, speed: float, start: float = 0.0):
-        self.stop_replay()
-        path = DATA / "sessions" / fname
-        if not SAFE_NAME.match(fname) or not path.exists():
-            raise ValueError("no such session")
-        header, lines = load_session(path)
-        if not lines:
-            raise ValueError("session has no packets")
-        self.replay = Replay(fname, header, lines, self.lock, self.ctx, self.boards, speed, start)
-        self.replay.start()
-
-    def stop_replay(self):
-        if self.replay:
-            self.replay.stop()
-            self.replay = None
-
     def open_udp(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -811,10 +666,7 @@ class App:
                 # A crowd button sending to the board port drives the decoys; it is not a board.
                 if isinstance(pkt, dict) and self.decoys.handle_packet(pkt):
                     continue
-                if isinstance(pkt, dict) and pkt.get("t") == "cam":   # the camera needs no LUNA_SUB
-                    self._camera_sightings(pkt)
-                else:
-                    self.known_nodes.add(src[0])
+                self.known_nodes.add(src[0])
                 self.live.ingest(pkt, rt, src)
                 self.record(rt, src, pkt)
 
@@ -890,7 +742,6 @@ class App:
                             self._rebuild()
                     self.live.tick(now)
                     self._tick_decoys(now)
-                    self._camera_upkeep(now)
             except Exception:
                 traceback.print_exc()
                 with self.lock:
@@ -1001,32 +852,26 @@ class App:
             with self.lock:
                 self.decoys.handle_packet(p)
 
-    def snapshot(self, view: str) -> dict:
+    def snapshot(self) -> dict:
         with self.lock:
             recording = {"on": bool(self.rec_file),
                          "file": self.rec_path.name if self.rec_path and self.rec_file else None,
                          "packets": self.rec_count}
-            extra = {"view": view, "layout": self.layout, "calib": self.calib_summary(), "recording": recording,
+            extra = {"layout": self.layout, "calib": self.calib_summary(), "recording": recording,
                      "phone_cal": {"pin": None, "port": self.phone_port, "https": self.phone_https},
                      "settings": self.settings, "settings_info": cfg.INFO,
                      "settings_defaults": cfg.DEFAULTS, "lab": self.lab,
                      "furniture_prior": bool(self.blocked), "ssid": self.net.get("ssid"), "wall": time.time()}
             extra["decoys"] = self._decoy_snapshot()
-            replay = self.replay
-            if replay:
-                extra["replay"] = replay.info()
-                if view == "replay":
-                    return replay.tracker.snapshot(extra)
             return self._jam(self.live.snapshot(extra))
 
-    def snapshot_json(self, view: str) -> str:
+    def snapshot_json(self) -> str:
         """Shared by all SSE clients so several open tabs cost one snapshot per tick."""
         now = time.monotonic()
-        cached = self._snap_cache.get(view)
-        if cached and now - cached[0] < SSE_S * 0.8:
-            return cached[1]
-        text = json.dumps(self.snapshot(view), separators=(",", ":"))
-        self._snap_cache[view] = (now, text)
+        if now - self._snap_cache[0] < SSE_S * 0.8:
+            return self._snap_cache[1]
+        text = json.dumps(self.snapshot(), separators=(",", ":"))
+        self._snap_cache = (now, text)
         return text
 
     def phone_for_ip(self, ip: str, override=None):
@@ -1150,7 +995,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
-        view = "replay" if self._query(url).get("view") == "replay" else "live"
         path = url.path
         if path in ("/", "/index.html"):
             return self._file(STATIC / "index.html", "text/html")
@@ -1164,18 +1008,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/scan":
             return self._json(read_json(DATA / "scan" / "room.json", None))
         if path == "/api/state":
-            return self._json(APP.snapshot(view))
-        if path == "/camera":
-            return self._file(STATIC / "camera.html", "text/html")
-        if path == "/api/camera":
-            with APP.lock:
-                return self._json(APP.camera_info())
-        if path == "/api/camera/preview.jpg":
-            try:
-                with urlopen(f"http://127.0.0.1:{CAMERA_PREVIEW_PORT}/preview.jpg", timeout=1.0) as r:
-                    return self._send(200, "image/jpeg", r.read())
-            except OSError:   # camera not running yet, or no frame since the page started asking
-                return self._json({"error": "no picture yet"}, 503)
+            return self._json(APP.snapshot())
         if path == "/api/crowd":   # toggles the decoys; ?on=1 / ?on=0 sets them
             on = self._query(url).get("on")
             state = APP.toggle_decoys() if on is None else APP.set_decoys(on in ("1", "true", "on"))
@@ -1183,7 +1016,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/plan":
             return self._json(self._plan())
         if path == "/api/events":
-            return self._sse(view)
+            return self._sse()
         if path == "/api/sessions":
             return self._json(self._sessions())
         if path == "/api/calibration/export":
@@ -1213,7 +1046,7 @@ class Handler(BaseHTTPRequestHandler):
             out.append({"file": path.name, "bytes": st.st_size, "mtime": st.st_mtime})
         return out
 
-    def _sse(self, view):
+    def _sse(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
@@ -1223,7 +1056,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.wfile.write(b"retry: 1000\n\n")
             while True:
-                self.wfile.write(f"data: {APP.snapshot_json(view)}\n\n".encode())
+                self.wfile.write(f"data: {APP.snapshot_json()}\n\n".encode())
                 self.wfile.flush()
                 time.sleep(SSE_S)
         except OSError:
@@ -1318,21 +1151,11 @@ def _post_tests_clear(a: App, b: dict):
     a._save_calib()
 
 
-def _post_replay_control(a: App, b: dict):
-    if a.replay:
-        if "paused" in b:
-            a.replay.set_paused(bool(b["paused"]))
-        if "speed" in b:
-            a.replay.set_speed(finite(b["speed"]))
-
-
 def _post_session_delete(a: App, b: dict):
     name = str(b["file"])
     require(SAFE_NAME.match(name), "file")
     if a.rec_path and a.rec_path.name == name and a.rec_file:
         return 409, "stop recording first"
-    if a.replay and a.replay.file == name:
-        a.stop_replay()
     try:
         (DATA / "sessions" / name).unlink()
     except FileNotFoundError:
@@ -1341,8 +1164,6 @@ def _post_session_delete(a: App, b: dict):
 
 # Handlers run under APP.lock; each returns None (ok) or (status, error).
 DASHBOARD_POST = {
-    "/api/camera/place": lambda a, b: a.place_camera(b) and None,
-    "/api/camera/clear": lambda a, b: a.clear_camera() and None,
     "/api/layout": _post_layout,
     "/api/capture": _post_capture,
     "/api/capture/cancel": lambda a, b: a.live.cancel_capture(),
@@ -1354,10 +1175,6 @@ DASHBOARD_POST = {
     "/api/record": lambda a, b: a.set_recording(bool(b.get("on"))),
     "/api/settings": lambda a, b: a.set_setting(str(b["key"]), bool(b["on"])),
     "/api/lab/run": lambda a, b: a.start_lab(),
-    "/api/replay/start": lambda a, b: a.start_replay(str(b["file"]), finite(b.get("speed", 1.0)),
-                                                     finite(b.get("start", 0))),
-    "/api/replay/control": _post_replay_control,
-    "/api/replay/stop": lambda a, b: a.stop_replay(),
     "/api/session/delete": _post_session_delete,
 }
 
@@ -1366,6 +1183,20 @@ class QuietServer(ThreadingHTTPServer):
     # Phones probing http on the https port, or dropping TLS mid-handshake, are routine; skip the tracebacks.
     def handle_error(self, request, client_address):
         pass
+
+
+_ping_lock = threading.Lock()
+_ping_bucket: dict = {}
+
+
+def _ping_ok(ip: str) -> bool:
+    now = time.monotonic()
+    with _ping_lock:
+        tokens, last = _ping_bucket.get(ip, (PING_BURST, now))
+        tokens = min(PING_BURST, tokens + (now - last) * PING_MAX_HZ)
+        ok = tokens >= 1.0
+        _ping_bucket[ip] = (tokens - 1.0 if ok else tokens, now)
+        return ok
 
 
 class PhoneHandler(Handler):
@@ -1387,8 +1218,6 @@ class PhoneHandler(Handler):
             return self._file(STATIC / "phone.html", "text/html")
         if url.path == "/phone.js":
             return self._file(STATIC / "phone.js", "application/javascript")
-        if url.path == "/ping":
-            return self._send(204, "text/plain", b"")
         if url.path == "/api/state":
             q = self._query(url)
             ip = self.client_address[0]
@@ -1400,6 +1229,13 @@ class PhoneHandler(Handler):
         if not self._allowed():
             return self._json({"error": "forbidden"}, 403)
         path = urlparse(self.path).path
+        if path == "/ping":
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            if length > PING_MAX_BYTES:
+                self.close_connection = True
+                return self._send(413, "text/plain", b"")
+            self.rfile.read(length)
+            return self._send(204 if _ping_ok(self.client_address[0]) else 429, "text/plain", b"")
         try:
             body = self._body()
         except ValueError:
@@ -1503,7 +1339,6 @@ def main():
                         help="UDP port the Uno Q white button toggles the simulated decoys on (0 = off)")
     parser.add_argument("--targets", default="", help="board addresses host:port,... (simulator)")
     parser.add_argument("--no-record", action="store_true")
-    parser.add_argument("--no-camera", action="store_true", help="never start camera/luna_camera.py")
     parser.add_argument("--phone-port", type=int, default=int(net.get("phone_port", 8081)),
                         help="port for the phone calibration page on the demo Wi-Fi (0 = off)")
     args = parser.parse_args()
@@ -1539,8 +1374,6 @@ def main():
         pass
     finally:
         APP.set_recording(False)
-        if APP.cam_proc and APP.cam_proc.poll() is None:
-            APP.cam_proc.terminate()
 
 
 if __name__ == "__main__":

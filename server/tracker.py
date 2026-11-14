@@ -1,14 +1,12 @@
 """Packets in; receivers, board-to-board links and per-phone estimates out.
 
-One instance runs live and a fresh one per replay. All timing uses the packet receive time rt, so replays are
-deterministic. Callers hold App.lock.
+One instance runs live and a fresh one per recording fed back (recording.py). All timing uses the packet receive
+time rt, so feeding a recording back is deterministic. Callers hold App.lock.
 """
 from __future__ import annotations
 
 import math
-import sys
 from collections import deque
-from pathlib import Path
 from enum import Enum
 from typing import Callable, Dict, List, Optional
 
@@ -17,10 +15,6 @@ import sensing
 import settings as cfg
 import phone_filter
 from display import PointSmoother
-
-# camera/ sits beside server/; appended so nothing in the repo root shadows a server module.
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-from camera.fusion import CameraFusion  # noqa: E402
 
 STALE_S = 3.0
 LOST_S = 60.0
@@ -36,10 +30,6 @@ LINK_ALPHA = 0.02
 STATUS_HOLD_S = 1.5
 DEMO_UNC_SCALE = 0.75
 WALK_MAX_S = 600.0
-# Laptop camera (camera/), switched by the "camera" setting. It only sharpens joined phones it clearly matches, and
-# does nothing until camera/luna_camera.py is sending and data/camera/calibration.json exists.
-# A camera silent this long counts as gone: Phone.radio_track stops and resets.
-CAMERA_LIVE_S = 3.0
 # Each link keeps a fast level beside its slow baseline. While the fast level is LINK_DROP_DB below the baseline
 # (someone standing in the link) the baseline barely moves, so sensing and the map keep the empty-room value.
 LINK_FAST_ALPHA = 0.4
@@ -144,10 +134,6 @@ class Phone:
         self.samples: deque = deque()
         self.track = phone_filter.Track()
         self.raw: Optional[dict] = None
-        # Same filter without the camera, run only while a camera is live; camera matching gates on it. Gating on
-        # raw instead feeds back: a wrong match pulls raw onto that person and shrinks unc, so the match holds.
-        self.radio_track = phone_filter.Track()
-        self.radio_raw: Optional[dict] = None
         self.receivers = 0
         self.status: Optional[Status] = None
         self.pending: Optional[Status] = None
@@ -193,14 +179,6 @@ class Tracker:
         self.body_trail: deque = deque()
         # Per-window RSSI statistic used for phones: "r" (mean) or "q3" (upper quartile). Set from settings each tick.
         self.rssi_key = "r"
-        self.camera = CameraFusion()
-        self.camera_help = True   # settings "camera", copied each tick
-        self._camera_cal = None
-        self._camera_match: Dict[str, object] = {}
-        # mac -> rt of the camera packet last fused into that phone: a packet outlives several ticks (MAX_AGE_S), and
-        # fusing it again each tick would count one sighting as several.
-        self._camera_used: Dict[str, float] = {}
-
     def _event(self, t: float, text: str):
         self.events.append([t, text])
 
@@ -263,10 +241,6 @@ class Tracker:
             self.bad_packets += 1
             return
         kind = pkt.get("t")
-        if kind == "cam":
-            # Not a radio receiver: kept out of nodes so it never counts as a board, a link end or a phone exclusion.
-            self.camera.ingest(pkt, rt)
-            return
         node = self.nodes.get(nid)
         if node is None:
             node = self.nodes[nid] = Node(nid)
@@ -453,12 +427,11 @@ class Tracker:
         return [[round(s[0] - t0, 3), s[1], s[2], s[3], s[4]] for s in (ph.samples if ph else ()) if t0 <= s[0] <= t1]
 
     def anchor(self, mac: str, x: float, y: float, t: float):
-        """The holder marked where they stand ("mark_anchor" setting). Recorded, so replays do the same."""
+        """The holder marked where they stand ("mark_anchor" setting). Recorded, so the lab sees it too."""
         ctx = self.get_ctx()
         ph, m = self.phones.get(mac), ctx.get("map")
         if ph and m and cfg.merged(ctx.get("settings"))["mark_anchor"]:
             ph.track.pin(m, x, y, t)
-            ph.radio_track.pin(m, x, y, t)
 
     def fresh_report(self, mac: str) -> Optional[dict]:
         report = self.motion_reports.get(mac)
@@ -574,17 +547,6 @@ class Tracker:
         extra = [FUSE_W * v for v in fuse] if fuse is not None else None
         args = (m, t, lambda t0, t1: self.window(ph, t0, t1), mv, steps, facing, float(ctx.get("stride") or STRIDE_M),
                 st["pdr"], st["shadow_guard"])
-        if self._camera_live(t):
-            ph.radio_raw = ph.radio_track.step(*args, strength=strength, extra=extra, holder_facing=facing,
-                                               creep=creep) or ph.radio_raw
-        elif ph.radio_raw is not None:
-            ph.radio_track.reset()
-            ph.radio_raw = None
-        det = self._camera_match.get(mac)
-        if det is not None and self._camera_used.get(mac) != det.rt and len(m.cx) == len(m.cells):
-            self._camera_used[mac] = det.rt
-            cam = self.camera.loglik(det, m.cx, m.cy)
-            extra = cam if extra is None else cam + extra
         result = ph.track.step(*args, strength=strength, extra=extra, holder_facing=facing, creep=creep)
         ph.receivers = len(m.usable(self.window(ph, t - RECEIVERS_S, t)))
         if result:
@@ -598,9 +560,7 @@ class Tracker:
         ph.est = {"x": x, "y": y, "unc": unc, "raw": [round(raw["x"], 3), round(raw["y"], 3), round(raw["unc"], 3)],
                   "receivers": ph.receivers, "mode": "calibrated" if m.spots else "uncalibrated",
                   "kind": ph.status.value, "age": age, "t": t,
-                  # "feet" / "range" / "bearing" / "head" while the camera is sharpening this phone, else None.
-                  # Not rendered.
-                  "camera": det.kind if det is not None else None}
+                  "rings": m.rings(self.window(ph, t - RECEIVERS_S, t), ph.track.off)}
         self._trail(ph, m, t)
         return True
 
@@ -614,32 +574,10 @@ class Tracker:
         for mac in self.excluded() & self.phones.keys():   # tracked before it was known to be a board or the laptop
             del self.phones[mac]
         fuse = self.body_ll if st["fuse_body"] and len(self.phones) == 1 else None
-        self.camera_help = st["camera"]
-        self._camera_tick(t, ctx)
         for mac in list(self.phones):
             if not self._phone_tick(mac, self.phones[mac], t, ctx, st, m, fuse):
                 del self.phones[mac]
         self._capture_tick(t)
-
-    def _camera_live(self, t: float) -> bool:
-        return (self.camera_help and self.camera.calibrated and self.camera.last_rt is not None
-                and t - self.camera.last_rt <= CAMERA_LIVE_S)
-
-    def _camera_tick(self, t: float, ctx: dict):
-        """Match fresh camera detections to joined phones' radio-only estimates (Phone.radio_raw)."""
-        cal = ctx.get("camera")
-        if cal is not self._camera_cal:
-            self._camera_cal = cal
-            self.camera.set_calibration(cal)
-        self.camera.set_scene((ctx.get("layout") or {}).get("polygon"), ctx.get("scan_objects"))
-        self._camera_match = {}
-        for mac in self._camera_used.keys() - self.phones.keys():
-            del self._camera_used[mac]
-        if not self._camera_live(t):
-            return
-        tracks = {mac: (ph.radio_raw["x"], ph.radio_raw["y"], ph.radio_raw["unc"]) for mac, ph in self.phones.items()
-                  if ph.radio_raw and ph.status in (Status.ESTIMATED, Status.WEAK)}
-        self._camera_match = self.camera.assign(tracks, t)
 
     def _trail(self, ph: Phone, m, t: float):
         kind = ph.status.value
@@ -754,8 +692,6 @@ class Tracker:
             "dropped_unassoc": self.dropped_unassoc, "laptop_ip": self.laptop_ip,
             "events": list(self.events)[-25:], "packets": self.packets, "bad_packets": self.bad_packets,
             "body": dict(self.body, trail=list(self.body_trail)) if self.body else None,
-            # Counts only (never positions of people the camera sees); not rendered by the dashboard.
-            "camera": self.camera.status(t) if self.camera.last_rt is not None else None,
         }
         cap = self.capture
         if cap:

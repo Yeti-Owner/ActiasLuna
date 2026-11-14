@@ -37,7 +37,7 @@ async function poll() {
     $("err").textContent = "";
     if (previous && !S.capture) captureEnded(previous);
     noteResult();
-    keepAwake(!!S.capture || walk.next != null);
+    keepAwake(true);   // a sleeping screen stops the pings
     view();
     draw();
   } catch (e) {
@@ -48,13 +48,16 @@ async function poll() {
   }
 }
 
-// Keep this phone sending frames for the boards to hear: every request crosses the demo network.
+// Keep this phone transmitting for the boards to hear while the page is open: the boards only see frames the phone
+// sends, and an idle phone sends a few per second. Each ping is a small POST, so the phone itself puts PING_BYTES on
+// the air (a GET is mostly downlink). The server caps each phone at luna_server.PING_MAX_HZ; keep PING_MS above that.
+const PING_MS = 25, PING_INFLIGHT = 3, PING_BODY = "x".repeat(1000);
 let pings = 0;
 setInterval(() => {
-  if (document.hidden || pings > 3) return;
+  if (document.hidden || pings >= PING_INFLIGHT) return;
   pings++;
-  fetch("/ping", { cache: "no-store" }).catch(() => {}).finally(() => pings--);
-}, 100);
+  fetch("/ping", { method: "POST", body: PING_BODY, cache: "no-store" }).catch(() => {}).finally(() => pings--);
+}, PING_MS);
 setInterval(poll, 500);
 
 let wake = null;

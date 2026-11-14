@@ -48,6 +48,7 @@ HOLDER_DB = 7.0
 # A board straight ahead is also slightly louder than one to the side (the phone is in front of the body, nothing in
 # the way): HOLDER_FRONT_DB * max(0, cos(phi)) is subtracted from the loss.
 HOLDER_FRONT_DB = 1.5
+RING_MAX_M = 30.0
 
 Live = Dict[str, Tuple[float, int]]
 Blocked = List[Tuple[List[List[float]], float]]
@@ -474,6 +475,19 @@ class RadioMap:
         huber = np.where(z < k, z2, k * (2 * z - k))
         cost = huber.sum(0) + d * d * prec
         return -0.5 * cost, d + off
+
+    def rings(self, live: Live, off: float = 0.0) -> Dict[str, list]:
+        """Debug only, not used for positioning: each board's distance implied by its own reading under the bare
+        log-distance model (no GP residual, holder loss averaged over facing), as [best, near, far] metres for a
+        +-1 sd band. off is the phone's learned offset (phone_filter.Track.off)."""
+        loss = (HOLDER_DB - HOLDER_FRONT_DB) / math.pi if self.holder else 0.0
+        out = {}
+        for n, r, k in self.usable(live):
+            eta = max(0.5, self.fit["eta_n"].get(n, ETA_PRIOR))
+            sd = math.sqrt(SIGMA_OBS ** 2 + FRAME_VAR / k)
+            excess = self.fit["T"][n] + off - r - loss
+            out[n] = [round(min(RING_MAX_M, max(D0, 10 ** ((excess + db) / (10 * eta)))), 3) for db in (0.0, -sd, sd)]
+        return out
 
     def predict(self, belief, dt: float, speed: float) -> np.ndarray:
         """Random-walk motion spreading by speed * dt, plus a MIX floor. Used by sensing.Person."""

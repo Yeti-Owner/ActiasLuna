@@ -22,8 +22,6 @@ header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; backg
 .brand .glyph { color: var(--acc); }
 .spacer { flex: 1; }
 .badge { font-size: 11px; padding: 2px 8px; margin-left: 6px; border-radius: 10px; background: var(--line); }
-.badge.live { background: var(--acc); color: var(--acc-ink); }
-.badge.replay { background: var(--blue); color: #050a1a; }
 .badge.rec { background: var(--bad); }
 
 main { display: grid; grid-template-columns: 400px 1fr 360px; height: calc(100vh - 44px); }
@@ -89,8 +87,6 @@ ol.steps { margin: 4px 0 8px; }
 .lg.weak { border: 2px solid var(--acc); }
 .lg.stale { background: var(--stale); }
 
-#replayBar { display: flex; align-items: center; gap: 8px; padding: 6px; }
-#replayBar progress { flex: 1; }
 
 #simple { display: none; background: var(--panel); border-left: 1px solid var(--line); }
 body.simple main { grid-template-columns: 1fr 300px; }

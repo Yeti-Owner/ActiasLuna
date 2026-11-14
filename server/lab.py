@@ -1,4 +1,4 @@
-"""Settings lab: replay recorded sessions with each setting flipped and score raw estimates against ground truth.
+"""Settings lab: re-run recorded sessions with each setting flipped and score raw estimates against ground truth.
 
 Ground truth comes from the current calibration set:
   - check / test captures and "I'm here" marks: the phone stood at a known spot for the capture's duration. A mark
@@ -15,7 +15,7 @@ from typing import Dict, List
 import radiomap as rmap
 import settings as cfg
 import walkcal
-from replay import feed, load_session
+from recording import feed, load_session
 from tracker import Tracker
 
 WARMUP_S = 15.0
@@ -76,8 +76,7 @@ def _maps(layout, spots, links, blocked, groups, blocks=(), holder=False):
 
 def _score_truth(job, st, m, truth, lines, out):
     # heading/stride as App.ctx provides them; without them steps + compass silently does nothing.
-    ctx = {"map": m, "settings": st, "heading": job.get("heading") or {}, "stride": job.get("stride"),
-           "camera": job.get("camera")}
+    ctx = {"map": m, "settings": st, "heading": job.get("heading") or {}, "stride": job.get("stride")}
     tk = Tracker(lambda: ctx, [])
     mac = truth["phone"]
     still = truth["kind"] == "still"
@@ -156,10 +155,10 @@ def summarize(res: dict) -> dict:
     }
 
 
-def jobs(base: dict, layout, spots, links, blocked, truth_list, sessions, heading=None, stride=None,
-         camera=None) -> List[dict]:
+def jobs(base: dict, layout, spots, links, blocked, truth_list, sessions, heading=None,
+         stride=None) -> List[dict]:
     common = {"layout": layout, "spots": spots, "links": links, "blocked": blocked, "truths": truth_list,
-              "sessions": sessions, "heading": heading or {}, "stride": stride, "camera": camera}
+              "sessions": sessions, "heading": heading or {}, "stride": stride}
     out = [dict(common, name="your settings", key=None, settings=dict(base))]
     for key in cfg.DEFAULTS:
         if key in cfg.LAB_SKIP:
