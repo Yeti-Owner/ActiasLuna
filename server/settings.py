@@ -18,6 +18,7 @@ DEFAULTS = {
     "holder_body": True,
     "device_free": False,
     "mark_anchor": True,
+    "camera": False,
 }
 
 INFO = {
@@ -75,6 +76,11 @@ INFO = {
         "Snap to \"I'm here\"",
         "When you mark where you stand on the phone page, your dot moves there and tracking carries on from that "
         "known spot.",
+    ),
+    "camera": (
+        "Laptop camera helps phone",
+        "Where the laptop camera sees someone's feet sharpens the position of the joined phone they clearly belong "
+        "to. Never adds people of its own. Needs camera/luna_camera.py running and camera/calibrate.py done once.",
     ),
 }
 

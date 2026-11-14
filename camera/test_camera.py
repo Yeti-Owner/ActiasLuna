@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fusion       # noqa: E402
 import homography   # noqa: E402
-import moth_camera  # noqa: E402
+import luna_camera  # noqa: E402
 
 # A plausible camera: looks down at a 5 x 4 m floor; image bottom is near the camera.
 TRUE_H = np.array([[4.0, 0.3, 0.5], [0.2, -3.0, 4.2], [0.05, -0.6, 1.0]])
@@ -113,24 +113,214 @@ class FusionTest(unittest.TestCase):
         i = np.unravel_index(np.argmax(ll), ll.shape)
         self.assertAlmostEqual(gx[i], det.x, delta=0.11)
         self.assertAlmostEqual(gy[i], det.y, delta=0.11)
-        self.assertAlmostEqual(ll.min(), np.log(fusion.OUTLIER), delta=0.05)
+        self.assertAlmostEqual(ll.min(), fusion.WEIGHT * np.log(fusion.OUTLIER), delta=0.1)
         np.testing.assert_array_equal(self.cam.loglik(None, gx, gy), 0)
 
     def test_status_has_no_positions(self):
         self.cam.ingest(self.packet((0.5, 0.8)), rt=10.0)
-        self.assertEqual(set(self.cam.status(10.0)), {"calibrated", "seen", "used"})
+        self.assertEqual(set(self.cam.status(10.0)), {"calibrated", "head_calibrated", "age", "seen", "seen_by_head", "used"})
+
+    def test_new_calibration_applies_to_held_packet(self):
+        cam = fusion.CameraFusion(None)
+        cam.ingest(self.packet((0.5, 0.8)), rt=10.0)
+        self.assertEqual(cam.detections(10.0), [])
+        cam.set_calibration(homography.to_dict(homography.fit(IMG, floor_of(IMG)), IMG, floor_of(IMG)))
+        det = cam.detections(10.0)[0]
+        np.testing.assert_allclose((det.x, det.y), homography.project(TRUE_H, 0.5, 0.8), atol=1e-6)
+
+    def test_bad_calibration_switches_off(self):
+        line = [{"u": 0.1 * i, "v": 0.5, "x": float(i), "y": 0.0} for i in range(1, 5)]
+        cam = fusion.CameraFusion({"points": line})
+        self.assertFalse(cam.calibrated)
+
+
+def pinhole(x, y, z, cam=(0.2, 0.2, 0.8), yaw=0.8, pitch=0.1, focal=0.5, aspect=4 / 3):
+    """Normalised image (u, v) of room point (x, y, z) for a laptop on a table: wide lens, tilted slightly down.
+
+    Asserts the point is in frame, so a test can't silently use a point the camera couldn't see.
+    """
+    fwd = np.array([np.cos(yaw) * np.cos(pitch), np.sin(yaw) * np.cos(pitch), -np.sin(pitch)])
+    right = np.array([np.sin(yaw), -np.cos(yaw), 0.0])
+    up = np.cross(right, fwd)
+    d = np.array([x, y, z]) - np.array(cam)
+    depth = d @ fwd
+    assert depth > 0.1, "behind the camera"
+    u, v = 0.5 + focal * (d @ right) / depth, 0.5 - focal * aspect * (d @ up) / depth
+    assert 0 < u < 1 and 0 < v < 1, f"({x}, {y}, {z}) is out of frame: ({u:.2f}, {v:.2f})"
+    return float(u), float(v)
+
+
+CAL_HEAD_M = 1.7
+CAL_SPOTS = [(1.5, 1.5), (3.5, 1.5), (1.5, 3.5), (3.5, 3.5), (2.5, 2.5), (3.0, 2.0)]
+
+
+def head_calibration():
+    """Floor + head record made the way calibrate.py's space key makes it, by a 1.7 m person on CAL_SPOTS."""
+    feet = [pinhole(x, y, 0.0) for x, y in CAL_SPOTS]
+    heads = [pinhole(x, y, CAL_HEAD_M) for x, y in CAL_SPOTS]
+    rec = homography.to_dict(homography.fit(feet, CAL_SPOTS), feet, CAL_SPOTS)
+    rec["head"] = homography.to_dict(homography.fit(heads, CAL_SPOTS), heads, CAL_SPOTS)
+    return rec
+
+
+class HeadTest(unittest.TestCase):
+    def setUp(self):
+        self.cam = fusion.CameraFusion(head_calibration())
+
+    def detect(self, d, rt=5.0):
+        self.cam.ingest({"t": "cam", "w": 640, "h": 480, "det": [dict(d, s=0.9)]}, rt)
+        dets = self.cam.detections(rt)
+        return dets[0] if dets else None
+
+    def test_head_mapping_loaded(self):
+        self.assertTrue(self.cam.head_calibrated)
+
+    def test_head_only_places_calibrated_height_correctly(self):
+        hu, hv = pinhole(2.2, 2.6, CAL_HEAD_M)
+        det = self.detect({"hu": hu, "hv": hv})
+        self.assertEqual(det.kind, "head")
+        self.assertAlmostEqual(det.x, 2.2, delta=1e-6)
+        self.assertAlmostEqual(det.y, 2.6, delta=1e-6)
+
+    def test_height_error_lies_along_sight_line_and_inside_uncertainty(self):
+        x, y = 2.2, 2.6
+        hu, hv = pinhole(x, y, CAL_HEAD_M * 1.1)   # someone 10% taller than the calibrator
+        det = self.detect({"hu": hu, "hv": hv})
+        err = np.array([det.x - x, det.y - y])
+        self.assertGreater(np.hypot(*err), 0.05)   # being taller really does shift the estimate
+        sight = np.array([x - 0.2, y - 0.2])       # from the camera, along the floor
+        cos = abs(err @ sight) / (np.linalg.norm(err) * np.linalg.norm(sight))
+        self.assertGreater(cos, 0.99)
+        eigval, eigvec = np.linalg.eigh(det.cov)   # and the uncertainty is stretched the same way
+        self.assertGreater(abs(eigvec[:, -1] @ sight) / np.linalg.norm(sight), 0.99)
+        self.assertGreater(eigval[-1], 4 * eigval[0])
+        self.assertLess(np.sqrt(err @ np.linalg.solve(det.cov, err)), 1.5)
+
+    def test_feet_preferred_when_both_seen(self):
+        u, v = pinhole(2.0, 2.0, 0.0)
+        hu, hv = pinhole(2.0, 2.0, CAL_HEAD_M * 1.2)
+        det = self.detect({"u": u, "v": v, "hu": hu, "hv": hv})
+        self.assertEqual(det.kind, "feet")
+        self.assertAlmostEqual(det.x, 2.0, delta=1e-6)
+
+    def test_head_ignored_without_head_mapping(self):
+        rec = head_calibration()
+        del rec["head"]
+        cam = fusion.CameraFusion(rec)
+        hu, hv = pinhole(2.0, 2.0, CAL_HEAD_M)
+        cam.ingest({"t": "cam", "w": 640, "h": 480, "det": [{"hu": hu, "hv": hv, "s": 0.9}]}, 1.0)
+        self.assertFalse(cam.head_calibrated)
+        self.assertEqual(cam.detections(1.0), [])
+
+    def test_head_mapping_needs_floor_mapping(self):
+        cam = fusion.CameraFusion({"points": [], "head": head_calibration()["head"]})
+        self.assertFalse(cam.calibrated)
+        self.assertFalse(cam.head_calibrated)
+
+    def test_status_counts_head_detections(self):
+        hu, hv = pinhole(2.2, 2.6, CAL_HEAD_M)
+        self.detect({"hu": hu, "hv": hv})
+        st = self.cam.status(5.0)
+        self.assertEqual((st["seen"], st["seen_by_head"], st["head_calibrated"]), (1, 1, True))
+
+
+class HeightCheckTest(unittest.TestCase):
+    """Is it a person? Bottom + top give an object's height relative to the calibrating person."""
+
+    def setUp(self):
+        self.cam = fusion.CameraFusion(head_calibration())
+
+    def thing(self, x, y, bottom_z, top_z):
+        """Detection of something at floor (x, y) whose visible bottom is at bottom_z and top at top_z."""
+        u, v = pinhole(x, y, bottom_z)
+        hu, hv = pinhole(x, y, top_z)
+        self.cam.ingest({"t": "cam", "w": 640, "h": 480, "det": [{"u": u, "v": v, "hu": hu, "hv": hv, "s": 0.9}]}, 1.0)
+        dets = self.cam.detections(1.0)
+        return dets[0] if dets else None
+
+    def test_height_ratio_measures_height(self):
+        for rel in (0.7, 1.0, 1.1):
+            r = self.cam.height_ratio(pinhole(2.4, 2.2, 0.0), pinhole(2.4, 2.2, CAL_HEAD_M * rel))
+            self.assertAlmostEqual(r, rel, delta=1e-6)
+
+    def test_standing_and_sitting_people_use_feet(self):
+        for top in (CAL_HEAD_M, 0.7 * CAL_HEAD_M):
+            det = self.thing(2.4, 2.2, 0.0, top)
+            self.assertEqual(det.kind, "feet")
+            self.assertAlmostEqual(det.x, 2.4, delta=1e-6)
+
+    def test_short_moving_thing_is_not_a_person(self):
+        self.assertIsNone(self.thing(2.4, 2.2, 0.0, 0.4))   # a pet or a rolling chair
+
+    def test_desk_edge_bottom_falls_back_to_head(self):
+        det = self.thing(2.4, 2.2, 0.75, CAL_HEAD_M)        # legs hidden: the blob ends at the desk top
+        self.assertEqual(det.kind, "head")
+        self.assertAlmostEqual(det.x, 2.4, delta=1e-6)
+        self.assertAlmostEqual(det.y, 2.2, delta=1e-6)
+
+
+class MoverTracksTest(unittest.TestCase):
+    W = 640
+
+    def run_frames(self, tracks, boxes_per_frame, t0=0.0, dt=0.125):
+        out = []
+        for i, boxes in enumerate(boxes_per_frame):
+            out = tracks.update(boxes, t0 + i * dt, self.W)
+        return out
+
+    def test_mover_confirmed_after_moving_for_a_few_frames(self):
+        tr = luna_camera.MoverTracks()
+        frames = [[(200 + 8 * i, 100, 60, 200)] for i in range(luna_camera.MOVE_MIN_FRAMES + 1)]
+        out = self.run_frames(tr, frames)
+        self.assertEqual(len(out), 1)
+        self.assertFalse(out[0][2])
+
+    def test_flicker_and_still_blobs_never_count(self):
+        tr = luna_camera.MoverTracks()
+        self.assertEqual(self.run_frames(tr, [[(300, 100, 60, 200)]] * 10), [])          # never moves
+        self.assertEqual(self.run_frames(luna_camera.MoverTracks(), [[(300, 100, 60, 200)], [], [(50, 50, 40, 40)]]),
+                         [])                                                               # comes and goes
+
+    def test_stopped_mover_is_held_then_released(self):
+        tr = luna_camera.MoverTracks()
+        self.run_frames(tr, [[(200 + 8 * i, 100, 60, 200)] for i in range(5)])
+        held = tr.update([], 1.0, self.W)                    # faded into the background
+        self.assertEqual(len(held), 1)
+        self.assertTrue(held[0][2])
+        self.assertEqual(held[0][1], luna_camera.MOVE_HELD_SCORE)
+        self.assertEqual(tr.update([], 1.0 + luna_camera.MOVE_HOLD_S + 1, self.W), [])
+
+    def test_mover_leaving_by_the_side_is_not_held(self):
+        tr = luna_camera.MoverTracks()
+        self.run_frames(tr, [[(560 + 15 * i, 100, 60, 200)] for i in range(5)])   # reaches the right edge
+        self.assertEqual(tr.update([], 1.0, self.W), [])
 
 
 class PacketTest(unittest.TestCase):
-    def test_foot_point(self):
-        d = moth_camera.foot_point((100, 50, 60, 200), 640, 480, 0.8)
+    def test_body_has_feet_and_head(self):
+        d = luna_camera.person_record((100, 50, 60, 200), 640, 480, 0.8)
         self.assertEqual((d["u"], d["v"]), (round(130 / 640, 4), round(250 / 480, 4)))
+        self.assertEqual((d["hu"], d["hv"]), (round(130 / 640, 4), round(50 / 480, 4)))
 
-    def test_feet_out_of_view_dropped(self):
-        self.assertIsNone(moth_camera.foot_point((100, 200, 60, 280), 640, 480, 0.8))
+    def test_feet_out_of_view_keeps_head(self):
+        d = luna_camera.person_record((100, 200, 60, 280), 640, 480, 0.8)
+        self.assertNotIn("u", d)
+        self.assertEqual(d["hv"], round(200 / 480, 4))
+
+    def test_upper_body_never_has_feet(self):
+        d = luna_camera.person_record((100, 50, 60, 80), 640, 480, 0.5, "upper")
+        self.assertNotIn("u", d)
+        self.assertIn("hu", d)
+
+    def test_face_head_top_is_above_the_face(self):
+        d = luna_camera.person_record((100, 100, 40, 40), 640, 480, 0.6, "face")
+        self.assertEqual(d["hv"], round((100 - luna_camera.FACE_CROWN * 40) / 480, 4))
+
+    def test_nothing_usable_dropped(self):
+        self.assertIsNone(luna_camera.person_record((100, 0, 60, 480), 640, 480, 0.8))
 
     def test_packet_shape(self):
-        p = moth_camera.build_packet("cam:laptop", 3, 1234.5, 640, 480, [])
+        p = luna_camera.build_packet("cam:laptop", 3, 1234.5, 640, 480, [])
         self.assertEqual((p["t"], p["role"], p["seq"], p["up"], p["det"]), ("cam", "cam", 3, 1234, []))
 
 

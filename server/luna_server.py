@@ -153,6 +153,7 @@ class App:
         self.blocked = []
         self.scan_objects = []
         self._route_cache = (None, None)
+        self._camera_cache = (None, None)
         self.map = None
         self.df_map = None
         self.map_links = {}
@@ -324,10 +325,25 @@ class App:
     def _headings(self) -> dict:
         return {mac: h[0] for mac, h in self.calib.get("heading", {}).items()}
 
+    def camera_calib(self):
+        """Laptop camera calibration from camera/calibrate.py; re-read when the file changes, None if there is none.
+
+        The same dict object is returned until the file changes, so the tracker only refits on a real change.
+        """
+        path = DATA / "camera" / "calibration.json"
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = None
+        if self._camera_cache[0] != mtime:
+            calib = read_json(path, None) if mtime is not None else None
+            self._camera_cache = (mtime, calib if isinstance(calib, dict) else None)
+        return self._camera_cache[1]
+
     def ctx(self) -> dict:
         return {"map": self.map, "settings": self.settings, "df": self.df_map, "layout": self.layout,
                 "objects": [o["footprint"] for o in self.scan_objects], "heading": self._headings(),
-                "stride": self.calib.get("stride")}
+                "stride": self.calib.get("stride"), "camera": self.camera_calib()}
 
     def start_spot(self, body: dict, phone: str, default_s: float, delay: float):
         """Standing calibrate/test capture from a request body; the caller checked nothing is running."""
@@ -383,7 +399,7 @@ class App:
             return
         jobs = lab.jobs(dict(self.settings), self.layout, list(self.calib["spots"]), dict(self.map_links),
                         planner.blocked(self.scan_objects), truth_list, sessions, self._headings(),
-                        self.calib.get("stride"))
+                        self.calib.get("stride"), self.camera_calib())
         self.lab = {"state": "running", "started": time.time(), "sessions": len(sessions), "truths": len(truth_list)}
 
         def worker():
@@ -662,7 +678,8 @@ class App:
                     self.live.bad_packets += 1
                 continue
             with self.lock:
-                self.known_nodes.add(src[0])
+                if not (isinstance(pkt, dict) and pkt.get("t") == "cam"):   # the camera needs no subscription
+                    self.known_nodes.add(src[0])
                 self.live.ingest(pkt, rt, src)
                 self.record(rt, src, pkt)
 

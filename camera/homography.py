@@ -64,6 +64,19 @@ def project(H, u, v):
     return float(p[0] / p[2]), float(p[1] / p[2])
 
 
+def project_line(H, u, v):
+    """Where the sight line through (u, v) crosses the plane, in front of the camera or behind it.
+
+    `project` rejects points behind the camera because nobody stands there; this keeps them, because the crossing
+    is still a point on the sight line (fusion.py uses it to know which way that line runs). None when the line is
+    parallel to the plane.
+    """
+    p = H @ np.array([u, v, 1.0])
+    if abs(p[2]) <= 1e-12:
+        return None
+    return float(p[0] / p[2]), float(p[1] / p[2])
+
+
 def jacobian(H, u, v):
     """2x2 derivative of floor (x, y) with respect to image (u, v); turns image noise into floor noise."""
     p = H @ np.array([u, v, 1.0])
@@ -119,3 +132,18 @@ def from_dict(d):
     if len(pts) >= MIN_POINTS:
         return fit([(p["u"], p["v"]) for p in pts], [(p["x"], p["y"]) for p in pts])
     return np.asarray(d["H"], float)
+
+
+def head_from_dict(d):
+    """The head-height mapping (image head top -> floor spot below it) from a calibration record, or None.
+
+    calibrate.py stores it under "head" in the same shape as the floor record, when 4+ marks were taken by standing
+    on them (space), so each head point pairs with the floor spot its owner stood on.
+    """
+    head = d.get("head") if isinstance(d, dict) else None
+    if not isinstance(head, dict):
+        return None
+    try:
+        return from_dict(head)
+    except (ValueError, KeyError, TypeError):
+        return None
