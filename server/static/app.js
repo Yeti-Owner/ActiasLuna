@@ -45,7 +45,7 @@ function connect() {
   stream.onmessage = (ev) => {
     S = JSON.parse(ev.data);
     mergeBody(S);
-    mergeCrowd(S);
+    mergeDecoys(S);
     if (!editing) L = clone(S.layout);
     render();
   };
@@ -73,16 +73,20 @@ function mergeBody(s) {
   });
 }
 
-// Crowd mode (server/display.py): the simulated crowd replaces every real person in S.phones so everything draws it
-// like phones. Its MACs are fake and never go back to the server.
-function mergeCrowd(s) {
-  const c = s.crowd;
-  if (!c || !c.on) return;
-  s.phones = c.people.map((p) => ({
-    mac: p.mac, mac_fmt: p.mac.match(/../g).join(":"), name: "", associated: true, age: 0, per_node: {}, spark: [],
-    trail: p.trail.map((q) => [q[0], q[1], q[2], 0.4, "estimated"]),
-    est: { x: p.x, y: p.y, unc: 0.4, raw: [p.x, p.y, 0.4], kind: "estimated", receivers: 3, mode: "calibrated", age: 0, t: s.now },
-  }));
+// Demo crowd (server/crowd.py): decoys join S.phones and S.stations looking exactly like tracked phones (faked
+// per-board readings included), so every view shows them and the real person blends in. Their MACs are made up and
+// never go back to the server.
+function mergeDecoys(s) {
+  for (const d of s.decoys || []) {
+    const macFmt = d.mac.match(/../g).join(":");
+    s.phones.push({
+      mac: d.mac, mac_fmt: macFmt, name: "", ip: d.ip, associated: true, age: 0, per_node: d.per_node, spark: d.spark,
+      trail: d.trail.map((q) => [q[0], q[1], q[2], d.unc, "estimated"]),
+      est: { x: d.x, y: d.y, unc: d.unc, raw: [d.x, d.y, d.unc], kind: "estimated", receivers: Object.keys(d.per_node).length, mode: "calibrated", age: 0, t: s.now },
+    });
+    s.stations.push({ mac: macFmt, ip: d.ip, r: d.r, nm: "", infra: false });
+    for (const n of s.nodes) if (d.per_node[n.id]) n.frame_rate = Math.round((n.frame_rate + d.per_node[n.id].rate) * 100) / 100;
+  }
 }
 
 // 3D view: needs WebGL and the bundled three.js; report failures instead of showing a black box.
@@ -108,8 +112,7 @@ function apply3d() {
   const on = map3d();
   document.body.classList.toggle("d3", on);
   $("view3d").classList.toggle("hidden", !on);
-  $("dimTog").textContent = show3d ? "2D map" : "3D view";
-  $("dimTog").disabled = boardsOpen();
+  $("dimTog").textContent = on ? "2D map" : "3D view";
   if (on && ensure3d()) {
     v3.setVisible(true);
     if (S) { v3.setRoom(S.layout, SCAN); v3.update(S, colorFor, nodeLabel); }
@@ -661,7 +664,7 @@ $("delVert").onclick = () => {
   renderLayoutPanel(true); drawMap();
 };
 
-// Room scan upload: the server measures the room from the mesh (tools/import_scan.import_room) and resizes the layout
+// Room scan upload: the server reads the room from the labelled scan (tools/import_scan.import_room) and resizes the layout
 // to it. An empty body re-imports the stored scan turned a further 90 degrees.
 async function importScan(file) {
   const msg = $("scanMsg");
@@ -769,7 +772,7 @@ $("labRun").onclick = () => api("/api/lab/run", {});
 async function loadSessions() {
   const list = await (await fetch("/api/sessions")).json();
   $("sessList").innerHTML = list.map((s) => `<div class="sess"><span class="mono">${esc(s.file)} <span class="muted">${(s.bytes / 1024).toFixed(0)} kB</span></span>
-    <button data-rp="${esc(s.file)}">Replay</button><button data-del="${esc(s.file)}">Delete</button></div>`).join("") || "none";
+    <button data-del="${esc(s.file)}">Delete</button></div>`).join("") || "none";
   document.querySelectorAll("#sessList [data-rp]").forEach((b) => (b.onclick = async () => {
     await api("/api/replay/start", { file: b.dataset.rp, speed: +$("rpSpeed").value });
     view = "replay"; connect();
@@ -785,7 +788,12 @@ $("rpPause").onclick = () => S && S.replay && api("/api/replay/control", { pause
 $("rpSpeed").onchange = () => api("/api/replay/control", { speed: +$("rpSpeed").value });
 $("rpStop").onclick = async () => { await api("/api/replay/stop", {}); view = "live"; connect(); };
 $("viewTog").onclick = () => { view = view === "live" ? "replay" : "live"; connect(); };
-$("dimTog").onclick = () => { show3d = !show3d; remember("luna3d", show3d ? "1" : "0"); apply3d(); };
+$("dimTog").onclick = () => {
+  show3d = !map3d();
+  remember("luna3d", show3d ? "1" : "0");
+  if (show3d) $("stBoards").open = false;   // the Boards step auto-opens while boards are unplaced and would hide 3D
+  apply3d();
+};
 $("v3home").onclick = () => v3 && v3.resetView();
 $("v3top").onclick = () => v3 && v3.topView();
 $("modeTog").onclick = () => { simple = !simple; remember("lunaMode", simple ? "simple" : "debug"); applyMode(); };

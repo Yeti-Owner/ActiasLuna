@@ -54,8 +54,8 @@ cd ../..
 cd web && npm install && cd ..                         # only for the web frontend
 ```
 
-Room scan: on the dashboard open Setup → Room → *Import room scan* (.glb, or a .zip holding one). It measures the
-outline and furniture, sizes the layout and puts the scan in the 3D view (*Turn 90°* if the corners don't line up;
+Room scan: on the dashboard open Setup → Room → *Import room scan* (.glb, or a .zip holding one, exported in room mode
+so walls, doors and furniture are labelled). It reads the floor outline, doors and furniture, sizes the layout and puts the scan in the 3D view (*Turn 90°* if the corners don't line up;
 `python tools/import_scan.py scan.zip --set-layout` does the same). The scan lives in `data/scan/` and is committed;
 the rest of `data/` (layout, calibration, recordings) stays on each laptop.
 
@@ -86,8 +86,11 @@ No boards? `python tools/sim_nodes.py --real` simulates your boards at their sav
 
 ## Decoy crowd and the Uno Q button
 
-The crowd is a display effect: simulated phones (MACs `02:00:DE:C0:*`, labelled *SIMULATED*) that gather around the
-tracked person. Nothing is transmitted and the real estimate is untouched.
+The crowd is a display effect: simulated phones that gather around the tracked person. For the demo the dashboard
+shows them exactly like real phones everywhere, including the Advanced tables (faked per-board signal, AP station
+entries, join/leave events), and while it is on the real people's shown dots and trails jump around too, so nobody is
+easy to follow. Decoys are flagged `sim: true` in the server data, nothing is transmitted, and the real estimates,
+recordings and accuracy numbers are untouched (`crowd.py`, `App._jam`).
 
 - **Uno Q white button:** plug the Uno Q in by USB and run `python tools/unoq_button_adb.py`. It reads the
   button over adb, so it needs Android platform-tools (`adb`); it finds the Arduino or Android SDK copy on its own,

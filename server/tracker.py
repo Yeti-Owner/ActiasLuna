@@ -6,9 +6,7 @@ deterministic. Callers hold App.lock.
 from __future__ import annotations
 
 import math
-import sys
 from collections import deque
-from pathlib import Path
 from enum import Enum
 from typing import Callable, Dict, List, Optional
 
@@ -16,11 +14,7 @@ import radiomap as rmap
 import sensing
 import settings as cfg
 import phone_filter
-from display import Crowd, PointSmoother
-
-# The camera fusion lives in the repo's camera/ folder (numpy only, like the rest of the server).
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from camera.fusion import CameraFusion  # noqa: E402
+from display import PointSmoother
 
 STALE_S = 3.0
 LOST_S = 60.0
@@ -36,9 +30,6 @@ LINK_ALPHA = 0.02
 STATUS_HOLD_S = 1.5
 DEMO_UNC_SCALE = 0.75
 WALK_MAX_S = 600.0
-# Camera walk: the camera "sees the walker" while it placed them within the last CAM_SEEN_S.
-CAM_SEEN_S = 1.5
-STILL_LEASH_SCALE = 3.0
 # Each link keeps a fast level beside its slow baseline. While the fast level is LINK_DROP_DB below the baseline
 # (someone standing in the link) the baseline barely moves, so sensing and the map keep the empty-room value.
 LINK_FAST_ALPHA = 0.4
@@ -68,7 +59,6 @@ MEDIAN_MIN_PKTS = 6
 CSI_MOVE_RATIO = 1.8
 # Weight of the device-free log-likelihood added to a phone's; only used with exactly one phone present.
 FUSE_W = 0.5
-BODY_MAC = "body"
 # Per-phone motion reports kept so the walk between two "I'm here" marks can be cut out (App._finish_mark).
 MOTION_LOG_S = 120.0
 
@@ -159,11 +149,8 @@ class Phone:
 
 
 class Tracker:
-    def __init__(self, get_ctx: Callable[[], dict], boards: List[dict], hidden=()):
+    def __init__(self, get_ctx: Callable[[], dict], boards: List[dict]):
         self.get_ctx = get_ctx
-        # Crowd-button boards: never shown as a receiver, station, phone or in events.
-        self.hidden = {str(m).lower() for m in hidden}
-        self.crowd = Crowd()
         self.labels = {str(b.get("base_mac", "")).lower(): b.get("label", "") for b in boards}
         self.nodes: Dict[str, Node] = {}
         self.stations: Dict[str, dict] = {}
@@ -173,6 +160,9 @@ class Tracker:
         self.events: deque = deque(maxlen=60)
         self.dropped_unassoc = 0
         self.laptop_ip: Optional[str] = None
+        # The laptop's own Wi-Fi MACs. The AP lists a station before DHCP gives it an IP (ip 0.0.0.0), so matching the
+        # laptop by laptop_ip alone lets it be tracked as a phone for those first seconds.
+        self.laptop_macs: set = set()
         self.now = 0.0
         self.capture: Optional[dict] = None
         self.on_capture_done: Optional[Callable[[dict], None]] = None
@@ -189,10 +179,6 @@ class Tracker:
         self.body_trail: deque = deque()
         # Per-window RSSI statistic used for phones: "r" (mean) or "q3" (upper quartile). Set from settings each tick.
         self.rssi_key = "r"
-        # Laptop camera ("camera" setting): detections only ever sharpen a joined phone, see camera/fusion.py.
-        self.camera = CameraFusion()
-        self._camera_cal = None
-        self._camera_match: Dict[str, object] = {}
 
     def _event(self, t: float, text: str):
         self.events.append([t, text])
@@ -204,8 +190,8 @@ class Tracker:
         return {n.ifm: n.id for n in self.nodes.values() if n.ifm}
 
     def excluded(self) -> set:
-        """Never tracked as phones: boards (id and on-air MAC), the laptop (by its IP) and hidden MACs."""
-        out = set(self.hidden)
+        """Never tracked as phones: boards (id and on-air MAC) and the laptop (its MACs, and whatever holds its IP)."""
+        out = set(self.laptop_macs)
         for node in self.nodes.values():
             out.add(node.id)
             if node.ifm:
@@ -213,17 +199,6 @@ class Tracker:
         if self.laptop_ip:
             out.update(m for m, s in self.stations.items() if s.get("ip") == self.laptop_ip)
         return out
-
-    def _crowd(self, pkt: dict):
-        mac = str(pkt.get("id", "")).lower()
-        if mac and mac not in self.hidden:
-            self.hidden.add(mac)
-            self.stations.pop(mac, None)
-            self.phones.pop(mac, None)
-            tag = fmt_mac(mac)
-            self.events = deque((e for e in self.events if tag not in e[1]), maxlen=self.events.maxlen)
-        if pkt.get("on") in (0, 1):
-            self.crowd.set(bool(pkt["on"]))
 
     def _link(self, tx: str, rx: str, rssi: float, frames: int):
         """links[(tx, rx)] = [slow baseline dBm, frames seen, fast level dBm]."""
@@ -267,13 +242,6 @@ class Tracker:
             self.bad_packets += 1
             return
         kind = pkt.get("t")
-        if kind == "crowd":
-            self._crowd(pkt)
-            return
-        if kind == "cam":
-            # Not a radio receiver: kept out of nodes so it never counts as a board or a link end.
-            self.camera.ingest(pkt, rt)
-            return
         node = self.nodes.get(nid)
         if node is None:
             node = self.nodes[nid] = Node(nid)
@@ -297,8 +265,7 @@ class Tracker:
         elif kind == "sta":
             self._stations(pkt, rt)
         elif kind == "ev":
-            if str(pkt.get("m", "")).lower() not in self.hidden:
-                self._event(rt, f"{pkt.get('e')} {fmt_mac(pkt.get('m', '000000000000'))} reason={pkt.get('reason')}")
+            self._event(rt, f"{pkt.get('e')} {fmt_mac(pkt.get('m', '000000000000'))} reason={pkt.get('reason')}")
         node.prune(rt)
 
     def _telemetry(self, node: Node, pkt: dict, rt: float):
@@ -319,7 +286,7 @@ class Tracker:
         current = {}
         for entry in pkt.get("sta") or []:
             mac = str(entry.get("m", "")).lower()
-            if mac and mac not in self.hidden:
+            if mac:
                 current[mac] = {"ip": entry.get("ip"), "r": entry.get("r"), "nm": entry.get("nm", ""), "t": rt}
         for mac in current:
             if mac not in self.stations:
@@ -455,6 +422,11 @@ class Tracker:
         """Logged reports with t0 <= rt <= t1 as [rt - t0, steps, compass, moving] (walkcal.leg_fit's shape)."""
         return [[round(r[0] - t0, 3)] + r[1:] for r in self.motion_log.get(mac, ()) if t0 <= r[0] <= t1]
 
+    def samples_between(self, mac: str, t0: float, t1: float) -> List[list]:
+        """This phone's readings with t0 <= rt <= t1 as capture samples [rt - t0, board, frames, rssi, sd]."""
+        ph = self.phones.get(mac)
+        return [[round(s[0] - t0, 3), s[1], s[2], s[3], s[4]] for s in (ph.samples if ph else ()) if t0 <= s[0] <= t1]
+
     def anchor(self, mac: str, x: float, y: float, t: float):
         """The holder marked where they stand ("mark_anchor" setting). Recorded, so replays do the same."""
         ctx = self.get_ctx()
@@ -506,11 +478,11 @@ class Tracker:
         prev, ph.steps_seen = ph.steps_seen, steps
         return steps - prev if prev is not None and steps > prev else 0
 
-    def _display(self, ph: Phone, m, demo: bool, mv: int, t: float):
+    def _display(self, ph: Phone, m, demo: bool, t: float):
         x, y, unc = ph.raw["x"], ph.raw["y"], ph.raw["unc"]
         if not demo:
             return x, y, unc
-        sx, sy, su = ph.smoother(x, y, unc, t, STILL_LEASH_SCALE if mv == 0 else 1.0)
+        sx, sy, su = ph.smoother(x, y, unc, t)
         if rmap.point_in_poly(sx, sy, m.poly):
             x, y = sx, sy
         return x, y, max(rmap.FT, DEMO_UNC_SCALE * su)
@@ -574,10 +546,6 @@ class Tracker:
             if mv == -1 or radio == 1:
                 mv = radio
         extra = [FUSE_W * v for v in fuse] if fuse is not None else None
-        det = self._camera_match.get(mac)
-        if det is not None and len(m.cx) == len(m.cells):
-            cam = self.camera.loglik(det, m.cx, m.cy)
-            extra = cam if extra is None else cam + extra
         result = ph.track.step(m, t, lambda t0, t1: self.window(ph, t0, t1), mv, steps, facing,
                                float(ctx.get("stride") or STRIDE_M), st["pdr"], st["shadow_guard"],
                                strength=strength, extra=extra, holder_facing=facing, creep=creep)
@@ -588,13 +556,11 @@ class Tracker:
             return True
         full = ph.receivers >= min(3, len(m.nodes))
         self._set_status(ph, Status.ESTIMATED if full else Status.WEAK, t)
-        x, y, unc = self._display(ph, m, st["smoothing"], mv, t)
+        x, y, unc = self._display(ph, m, st["smoothing"], t)
         raw = ph.raw
         ph.est = {"x": x, "y": y, "unc": unc, "raw": [round(raw["x"], 3), round(raw["y"], 3), round(raw["unc"], 3)],
                   "receivers": ph.receivers, "mode": "calibrated" if m.spots else "uncalibrated",
-                  "kind": ph.status.value, "age": age, "t": t,
-                  # "feet" / "head" while the laptop camera is sharpening this phone's position, else None.
-                  "camera": det.kind if det is not None else None}
+                  "kind": ph.status.value, "age": age, "t": t}
         self._trail(ph, m, t)
         return True
 
@@ -605,37 +571,18 @@ class Tracker:
         self.rssi_key = "q3" if st["robust_rssi"] else "r"
         m = ctx.get("map")
         self._body_tick(t, ctx, st)
+        for mac in self.excluded() & self.phones.keys():   # tracked before it was known to be a board or the laptop
+            del self.phones[mac]
         fuse = self.body_ll if st["fuse_body"] and len(self.phones) == 1 else None
-        self._camera_tick(t, ctx, st)
         for mac in list(self.phones):
             if not self._phone_tick(mac, self.phones[mac], t, ctx, st, m, fuse):
                 del self.phones[mac]
         self._capture_tick(t)
-        layout = ctx.get("layout") or {}
-        self.crowd.step(t, layout.get("polygon"), ctx.get("objects") or [])
-
-    def _camera_tick(self, t: float, ctx: dict, st: dict):
-        """Match fresh camera detections to joined phones' raw estimates (never the smoothed display dot)."""
-        cal = ctx.get("camera")
-        if cal is not self._camera_cal:
-            self._camera_cal = cal
-            self.camera.set_calibration(cal)
-        self._record_camera_walk(t)   # calibration needs no "camera" setting: it doesn't touch live positions
-        self._camera_match = {}
-        if not st["camera"]:
-            return
-        tracks = {mac: (ph.raw["x"], ph.raw["y"], ph.raw["unc"]) for mac, ph in self.phones.items()
-                  if ph.raw and ph.status in (Status.ESTIMATED, Status.WEAK)}
-        self._camera_match = self.camera.assign(tracks, t)
 
     def _trail(self, ph: Phone, m, t: float):
         kind = ph.status.value
         ph.recent = []
-        last = ph.last_trail_t
-        for ts, x, y, unc in ph.track.smoothed(m):
-            if ts - last < TRAIL_STEP_S:
-                continue
-            last = ts
+        for ts, x, y, unc in ph.track.smoothed(m, ph.last_trail_t, TRAIL_STEP_S):
             point = [round(ts, 2), round(x, 3), round(y, 3), round(unc, 3), kind]
             if ts <= t - phone_filter.SMOOTH_LAG_S + 0.3:
                 ph.trail.append(point)
@@ -650,41 +597,8 @@ class Tracker:
         self.capture = {"kind": kind, "phone": phone.lower(), "x": x, "y": y, "orientation": orientation,
                         "duration": duration, "t0": t, "samples": [], "marks": [], "stop": False}
 
-    def start_walk(self, phone: str, orientation: str, t: float, camera: bool = False):
-        """camera=True: a camera walk. No taps; the laptop camera supplies where the walker was ("cam" rows, see
-        _record_camera_walk and walkcal.camera_truth)."""
+    def start_walk(self, phone: str, orientation: str, t: float):
         self.start_capture("walk", phone, 0.0, 0.0, orientation, WALK_MAX_S, t)
-        if camera:
-            self.capture["cam"] = []
-            self.capture["cam_crowded"] = 0
-            self.capture["cam_last_rt"] = None
-
-    def _record_camera_walk(self, t: float):
-        """During a camera walk, keep the camera's floor position for each new camera packet that shows exactly one
-        person with their feet in view: with only the walker in view it can't be anyone else, and feet are on the floor
-        (no height guess). Packets with nobody, a head-only detection or several people add nothing."""
-        cap = self.capture
-        if not cap or cap.get("cam") is None or capture_phase(cap, t) != "recording":
-            return
-        dets = self.camera.detections(t)
-        if not dets or dets[0].rt == cap["cam_last_rt"]:
-            return
-        cap["cam_last_rt"] = dets[0].rt
-        if len(dets) > 1:
-            cap["cam_crowded"] += 1
-        elif dets[0].kind == "feet":
-            cap["cam"].append([round(dets[0].rt - cap["t0"], 3), round(dets[0].x, 3), round(dets[0].y, 3)])
-
-    def camera_walk_status(self, t: float) -> Optional[dict]:
-        """For the phone page and dashboard during a camera walk: positions so far, and whether the camera sees the
-        walker right now (a position in the last CAM_SEEN_S) or sees several people."""
-        cap = self.capture
-        if not cap or cap.get("cam") is None:
-            return None
-        last = cap["cam"][-1][0] + cap["t0"] if cap["cam"] else None
-        crowded = len(self.camera.detections(t)) > 1
-        return {"points": len(cap["cam"]), "seen": last is not None and t - last <= CAM_SEEN_S and not crowded,
-                "crowded": crowded}
 
     def mark(self, x: float, y: float, t: float, detour: bool = False) -> bool:
         """Record a tap. detour=True: the walker didn't go straight from the previous mark; walkcal skips that leg."""
@@ -778,15 +692,12 @@ class Tracker:
             "dropped_unassoc": self.dropped_unassoc, "laptop_ip": self.laptop_ip,
             "events": list(self.events)[-25:], "packets": self.packets, "bad_packets": self.bad_packets,
             "body": dict(self.body, trail=list(self.body_trail)) if self.body else None,
-            "crowd": self.crowd.snapshot(),
-            # Counts only: positions of people the camera sees are never sent.
-            "camera": self.camera.status(t) if self.camera.last_rt is not None or self.camera.calibrated else None,
         }
         cap = self.capture
         if cap:
             info = {k: cap[k] for k in ("kind", "phone", "x", "y", "orientation", "duration")}
             info.update(elapsed=round(t - cap["t0"], 1), phase=capture_phase(cap, t), marks=len(cap["marks"]),
-                        frames=sum(s[2] for s in cap["samples"]), camera=self.camera_walk_status(t))
+                        frames=sum(s[2] for s in cap["samples"]))
             out["capture"] = info
         if extra:
             out.update(extra)

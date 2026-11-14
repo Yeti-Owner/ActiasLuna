@@ -14,24 +14,24 @@ import numpy as np
 
 FT = 0.3048
 CELL_M = 0.5 * FT
-ETA_PRIOR, ETA_SD = 2.2, 0.7
+ETA_PRIOR, ETA_SD = 2.2, 1.2
 T_PRIOR_SD = 8.0
 D0 = 0.3
 # DELTA_SD: prior sd (dB) of an unknown phone's offset (model, pocket). DELTA_FIT_SD: one calibration group versus the
 # others (same phone, so small). Live readings are compared only after solving that offset per cell.
-DELTA_SD = 12.0
+DELTA_SD = 6.0
 DELTA_FIT_SD = 4.0
 # GP residual: GP_SF is the prior sd (dB) of what log-distance misses (walls, furniture), GP_LEN its length scale.
 # Spot noise: a standing spot sits inside one multipath fade (SN_STILL); a walked window averages several (SN_MOVE).
-GP_SF = 3.0
-GP_LEN = 1.2
+GP_SF = 4.0
+GP_LEN = 0.8
 SN_STILL = 3.0
 SN_MOVE = 2.0
 LOCAL_VAR = 1.0
 SIGMA_UNCAL = 6.0
 # SIGMA_OBS: fading sd (dB) of one live reading on top of the map's own uncertainty. FRAME_VAR / frames adds the
 # averaging noise of a window with few frames.
-SIGMA_OBS = 4.0
+SIGMA_OBS = 3.0
 FRAME_VAR = 9.0
 ROBUST_K = 2.5
 MIX = 0.02
@@ -44,7 +44,7 @@ SHADOW_W = 0.35
 # "holder_body": the person holding the phone shadows boards behind them. Expected loss for a board at angle phi from
 # the facing direction is HOLDER_DB * max(0, -cos(phi)). Spots record their facing so the map is fitted body-free;
 # live, facing comes from the compass or, without it, the direction-averaged loss HOLDER_DB / pi is assumed.
-HOLDER_DB = 3.0
+HOLDER_DB = 5.0
 
 Live = Dict[str, Tuple[float, int]]
 Blocked = List[Tuple[List[List[float]], float]]

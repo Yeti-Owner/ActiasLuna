@@ -23,7 +23,6 @@ firmware/luna_node/main/luna_secrets.h
 
 # Personal data: recordings, calibration, device MACs
 data/*
-config/crowd.json
 # ...except the imported room scan, so the 3D view and decoys work on a fresh clone (no MACs or recordings in it).
 !data/scan/
 data/scan/*
