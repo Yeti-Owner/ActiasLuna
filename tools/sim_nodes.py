@@ -3,6 +3,9 @@
 Speaks the real board UDP protocol (firmware/luna_node/main/main.c), so protocol changes must be mirrored here.
 Run the server with --targets 127.0.0.1:6101,127.0.0.1:6102,127.0.0.1:6103 and steer phones over UDP on 6100:
   GOTO <phone> <x> <y> | PATH <phone> | OFFSET <phone> <dB> | RATE <phone> <frames/s> | CROWD <n>
+--camera adds a simulated laptop camera (camera/luna_camera.py's `cam` packet) that sees phones and crowd walkers;
+a desk in the far corner hides feet there, so the head-height mapping gets exercised. --camera-cal writes its
+calibration (feet and head) so the server has something to use.
 """
 import argparse
 import json
@@ -60,7 +63,8 @@ def new_walker():
     length = math.hypot(end[0] - start[0], end[1] - start[1]) or 1.0
     speed = WALKER_SPEED * rng.uniform(0.8, 1.2)
     return {"x": start[0], "y": start[1], "vx": (end[0] - start[0]) / length * speed,
-            "vy": (end[1] - start[1]) / length * speed, "left": length / speed, "size": rng.uniform(0.7, 1.2)}
+            "vy": (end[1] - start[1]) / length * speed, "left": length / speed, "size": rng.uniform(0.7, 1.2),
+            "hgt": rng.uniform(1.55, 1.9)}
 
 
 def step_walkers(dt):
@@ -186,7 +190,12 @@ def control_loop():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(("127.0.0.1", 6100))
     while True:
-        data, src = sock.recvfrom(256)
+        try:
+            data, src = sock.recvfrom(256)
+        except ConnectionResetError:
+            # Windows reports an earlier "ok" reply that bounced (the sender had already closed its socket) on the
+            # next read; uncaught, it killed this thread and every simulated board and camera with it.
+            continue
         words = data.decode().split()
         try:
             cmd, name = words[0].upper(), words[1]
@@ -209,6 +218,151 @@ def control_loop():
             sock.sendto(b"ok", src)
         except (IndexError, ValueError):
             sock.sendto(b"err", src)
+
+
+# Simulated laptop camera (--camera): a pinhole on a table in one corner, looking at the room's centre. It sees every
+# simulated person, phone holders and crowd walkers alike, and speaks camera/luna_camera.py's `cam` packet.
+CAM_HEIGHT_M = 0.8
+CAM_PITCH = math.radians(5)   # laptop lids sit nearly upright
+CAM_FOCAL = 0.55          # focal length / image width (about 85 degrees across, a typical laptop webcam)
+CAM_ASPECT = 4 / 3
+CAM_NOISE = 0.004         # foot / head point noise, fraction of the frame
+PERSON_H_M = 1.7          # the calibrating person's height
+PHONE_H_M = 1.78          # phone holders are a little taller, so the head estimate is honestly off
+# A desk in the far part of the room hides the feet of anyone standing there (fractions of the room).
+CAM_DESK = (0.5, 0.55, 1.0, 1.0)
+
+
+def behind_desk(x, y):
+    x0, y0, x1, y1 = CAM_DESK
+    return x0 * ROOM["w"] <= x <= x1 * ROOM["w"] and y0 * ROOM["h"] <= y <= y1 * ROOM["h"]
+
+
+def cam_project(x, y, z=0.0):
+    """Normalised image (u, v) of a room point, or None if it is behind the camera or out of frame."""
+    cx, cy = 0.05 * ROOM["w"], 0.05 * ROOM["h"]
+    yaw = math.atan2(ROOM["h"] / 2 - cy, ROOM["w"] / 2 - cx)
+    fwd = (math.cos(yaw) * math.cos(CAM_PITCH), math.sin(yaw) * math.cos(CAM_PITCH), -math.sin(CAM_PITCH))
+    right = (math.sin(yaw), -math.cos(yaw), 0.0)
+    up = (right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2],
+          right[0] * fwd[1] - right[1] * fwd[0])
+    d = (x - cx, y - cy, z - CAM_HEIGHT_M)
+    depth = sum(a * b for a, b in zip(d, fwd))
+    if depth <= 0.1:
+        return None
+    u = 0.5 + CAM_FOCAL * sum(a * b for a, b in zip(d, right)) / depth
+    v = 0.5 - CAM_FOCAL * CAM_ASPECT * sum(a * b for a, b in zip(d, up)) / depth
+    return (u, v) if 0.0 < u < 1.0 and 0.0 < v < 1.0 else None
+
+
+UPPER_M = 0.6            # a head-and-shoulders box spans the top this much of a person
+
+
+def cam_record(x, y, hgt, feet_hidden=False, noise=None):
+    """One detection record like luna_camera.person_record for a person at (x, y) of height hgt, or None.
+
+    Feet in view: a whole-body box ("body", head to feet). Feet hidden or out of frame: a head-and-shoulders box
+    ("upper"). Box sizes follow the projection, so head-size ranging (camera/headrange.py) gets realistic input.
+    """
+    noise = noise or (lambda: 0.0)
+    feet, head = cam_project(x, y), cam_project(x, y, hgt)
+    if feet_hidden:
+        feet = None
+    if not feet and not head:
+        return None
+    if feet:
+        top, bottom, kind = (head[1] if head else 0.0), feet[1], "body"
+    else:
+        # Bigger people have bigger heads and shoulders, so head-size ranging carries an honest size error.
+        chest = cam_project(x, y, hgt - UPPER_M * hgt / PERSON_H_M)
+        top, bottom, kind = head[1], (chest[1] if chest else 1.0), "upper"
+    bh = max(0.02, bottom - top)
+    u = (feet or head)[0] + noise()
+    d = {"bx": round(u - 0.175 * bh / CAM_ASPECT, 4), "by": round(top, 4), "bw": round(0.35 * bh / CAM_ASPECT, 4),
+         "bh": round(bh * (1 + noise() * 5), 4), "s": 0.9, "k": kind}
+    if feet:
+        d["u"], d["v"] = round(feet[0] + noise(), 4), round(feet[1] + noise(), 4)
+    if head:
+        d["hu"], d["hv"] = round(head[0] + noise(), 4), round(head[1] + noise(), 4)
+    return d
+
+
+def cam_detections():
+    """Detection records like luna_camera.person_record: feet when in frame and not behind the desk, head top when
+    in frame. People of different heights, so head-based estimates carry a real error."""
+    people = ([(p["x"], p["y"], p.get("hgt", PHONE_H_M)) for p in PHONES.values()]
+              + [(w["x"], w["y"], w.get("hgt", PERSON_H_M)) for w in walkers])
+    noise = lambda: rng.gauss(0, CAM_NOISE)  # noqa: E731
+    out = []
+    for x, y, hgt in people:
+        d = cam_record(x, y, hgt, feet_hidden=behind_desk(x, y), noise=noise)
+        if d:
+            out.append(d)
+    return out
+
+
+def run_camera(dest):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    boot = time.time()
+    seq = 0
+    while True:
+        time.sleep(0.25)
+        with lock:
+            dets = cam_detections()
+        seq += 1
+        pkt = {"v": 1, "t": "cam", "id": "cam:sim", "role": "cam", "fw": "cam-sim", "seq": seq,
+               "up": int((time.time() - boot) * 1000), "w": 640, "h": 480, "det": dets}
+        try:
+            sock.sendto(json.dumps(pkt).encode(), dest)
+        except OSError:
+            pass
+
+
+def head_range_calibration():
+    """What camera/head_setup.py would save for the simulated camera: a PERSON_H_M person on three spots (left,
+    middle, right of view), seen whole and as head-and-shoulders."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "camera"))
+    import headrange
+    w, h = ROOM["w"], ROOM["h"]
+    cam = (0.05 * w, 0.05 * h)
+    samples = []
+    for fx, fy in [(0.35, 0.9), (0.7, 0.7), (0.9, 0.35)]:
+        x, y = fx * w, fy * h
+        obs = {}
+        for hidden in (False, True):
+            d = cam_record(x, y, PERSON_H_M, feet_hidden=hidden)
+            got = headrange.observe(d, 640, 480) if d else None
+            if got:
+                obs[got[0]] = got[1:]
+        samples.append({"xy": (x, y), "obs": obs})
+    return headrange.solve(cam, samples)
+
+
+def write_camera_calibration(path: Path, head=True, floor=True, head_range=True):
+    """Calibration as the camera tools make it: calibrate.py's feet (floor) and head-height points from a PERSON_H_M
+    person standing on marks, and head_setup.py's head-size ranging. Each part can be left out to test the others."""
+    w, h = ROOM["w"], ROOM["h"]
+    feet_pts, head_pts = [], []
+    for fx, fy in [(0.45, 0.45), (0.95, 0.45), (0.45, 0.95), (0.95, 0.95), (0.7, 0.7), (0.6, 0.85), (0.85, 0.6)]:
+        x, y = fx * w, fy * h
+        feet, top = cam_project(x, y), cam_project(x, y, PERSON_H_M)
+        if feet:
+            feet_pts.append({"u": feet[0], "v": feet[1], "x": x, "y": y})
+        if top:
+            head_pts.append({"u": top[0], "v": top[1], "x": x, "y": y})
+    record = {"version": 1, "source": "sim_nodes"}
+    if floor:
+        record["points"] = feet_pts
+        if head and len(head_pts) >= 4:
+            record["head"] = {"version": 1, "points": head_pts}
+    if head_range:
+        record["head_range"] = head_range_calibration()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    print(f"  wrote simulated camera calibration ({len(record.get('points', []))} feet, "
+          f"{len(record.get('head', {}).get('points', []))} head points"
+          f"{', head-size ranging' if head_range else ''}) to {path}")
 
 
 def use_real_layout():
@@ -241,8 +395,19 @@ def use_real_layout():
 def main():
     parser = argparse.ArgumentParser(description="ActiasLuna board SIMULATOR (UDP 127.0.0.1:6101-6103, control 6100)")
     parser.add_argument("--real", action="store_true", help="simulate config/boards.json at their layout positions")
-    if parser.parse_args().real:
+    parser.add_argument("--camera", nargs="?", const="127.0.0.1:5007", metavar="HOST:PORT",
+                        help="also simulate the laptop camera, sending to the server's UDP port (default 127.0.0.1:5007)")
+    parser.add_argument("--camera-cal", type=Path, metavar="PATH",
+                        help="write the simulated camera's calibration here (e.g. data/camera/calibration.json)")
+    args = parser.parse_args()
+    if args.real:
         use_real_layout()
+    if args.camera_cal:
+        write_camera_calibration(args.camera_cal)
+    if args.camera:
+        host, port = args.camera.rsplit(":", 1)
+        threading.Thread(target=run_camera, args=((host, int(port)),), daemon=True).start()
+        print(f"  simulated camera -> {host}:{port}")
     for board in BOARDS:
         threading.Thread(target=run_board, args=(board,), daemon=True).start()
     threading.Thread(target=move_phones, daemon=True).start()
