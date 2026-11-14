@@ -80,9 +80,26 @@ py tools/sim_macspoof.py --rotate 0      # randomization OFF, to compare (steady
 py tools/sim_macspoof.py --decoys 15 --rotate 3 --seconds 20
 ```
 
-Deliberately **not** built: a real radio that transmits forged-MAC frames to defeat tracking. That's an
-over-the-air spoofing/evasion tool, reusable against other networks and shared airspace, so we show the concept in
-software instead. If the team wants more, let's discuss it together first.
+## Live over-the-air version (real radio, honest)
+
+`firmware/mac_randomizer/mac_randomizer.ino` is the live counterpart: **one real ESP32 joins the demo hotspot and
+changes its own Wi-Fi address every few seconds**, exactly like a phone's "Private Wi-Fi Address". The Moth boards
+hear what looks like a new device each time, so the person's trail keeps resetting on real hardware — a live
+"watch tracking fail" moment to pair with the on-screen simulation.
+
+- Runs on a **spare ESP32 / ESP32-S3** as the "demo phone" (needs the *esp32 by Espressif* board package). Not the
+  Uno Q — its Wi-Fi is on the Linux side; there you'd instead rotate the address from Linux, e.g. a small loop
+  doing `ip link set wlan0 address <random locally-administered MAC>` then reconnecting.
+- Fill in `SSID` / `PASS` to match `config/network.json`. Don't commit real secrets.
+- `ROTATE_S` sets how often the address changes. It prints each new identity over serial as
+  `{"t":"macrot","n":..,"mac":".."}`.
+- Firmware not yet compiled/flashed here (no ESP32 on hand) — expect to tune it on the board, like any first flash.
+
+**Where the line is.** This device randomizes **its own** address — self-randomization, the same thing every modern
+phone does for privacy. What is deliberately **not** built is a radio that forges *other* devices' addresses or
+fabricates a crowd of fake devices to flood/confuse the receivers: that's an over-the-air spoofing/injection tool,
+reusable against other networks and the shared airspace a hotspot can't contain. The simulation already gives that
+"crowd" look on screen, so the demo loses nothing.
 
 ## For the group leader — questions / decisions
 
