@@ -55,6 +55,7 @@ export interface MothWordmarkProps {
   /** The pointer is a bat the swarm flees. Defaults to true. */
   interactive?: boolean
   /** Face the word is sampled from. Heavy weights form cleaner letters. */
+  transparent?: boolean
   fontFamily?: string
   /** Content laid over the sky (a headline, a nav). */
   children?: React.ReactNode
@@ -153,6 +154,7 @@ const MTH_CSS = `
 
 export default function MothWordmark({
   word = "Actias",
+  transparent = false,
   moths = 1400,
   preset = "luna",
   palette,
@@ -172,7 +174,7 @@ export default function MothWordmark({
   const canvasRef = React.useRef(null as HTMLCanvasElement | null)
   const opts = React.useRef({ flyFor, formIn, breakAt, releaseIn, interactive })
   opts.current = { flyFor, formIn, breakAt, releaseIn, interactive }
-  const key = [word, moths, colors.skyTop, colors.skyLow, colors.glow, colors.moth, colors.ink, reeds, fontFamily].join("|")
+  const key = [transparent, word, moths, colors.skyTop, colors.skyLow, colors.glow, colors.moth, colors.ink, reeds, fontFamily].join("|")
 
   React.useEffect(() => {
     const root = rootRef.current
@@ -442,7 +444,8 @@ export default function MothWordmark({
       moved = 0
 
       ctx.setTransform(1, 0, 0, 1, 0, 0)
-      if (sky) ctx.drawImage(sky, 0, 0)
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      if (sky && !transparent) ctx.drawImage(sky, 0, 0)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       // Two depth passes so near moths read brighter and heavier.
       for (let pass = 0; pass < 2; pass++) {
@@ -526,7 +529,7 @@ export default function MothWordmark({
     <div
       ref={rootRef}
       className={"mth-root " + className}
-      style={{ height, "--mth-sky": colors.skyTop } as React.CSSProperties}
+      style={{ height, "--mth-sky": transparent ? "transparent" : colors.skyTop } as React.CSSProperties}
     >
       <style>{MTH_CSS}</style>
       <canvas ref={canvasRef} aria-hidden="true" />

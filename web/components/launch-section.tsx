@@ -44,7 +44,7 @@ export default function LaunchSection() {
 
   return (
     <section className="relative w-full max-w-5xl mx-auto px-6 md:px-16 py-16">
-      <div data-moth-avoid className="relative rounded-3xl border border-white/20 bg-[#214F2E] p-8 md:p-12 shadow-2xl">
+      <div data-moth-avoid className="relative rounded-3xl border border-white/20 bg-[#102b1b]/75 backdrop-blur-xl p-8 md:p-12 shadow-2xl">
         {/* Decorative Ladybug perched playfully on the top-right corner of the Launch card */}
         <div className="absolute -top-5 -right-3 sm:-top-6 sm:-right-4 md:-top-7 md:-right-5 z-20 pointer-events-none select-none transition-transform duration-300 hover:scale-110">
           <div className="relative animate-ladybug">

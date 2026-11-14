@@ -1,3 +1,4 @@
+import { SiteBackground } from "@/components/ui/site-background"
 import { GeistSerif } from "geist/font/serif"
 import MothLogo from "@/components/ui/moth-logo"
 import React, { useEffect, useRef, useState, useMemo } from 'react'
@@ -435,13 +436,14 @@ export default function DashboardApp() {
 
   return (
     <div
-      className={`min-h-screen bg-[#2E6F40] text-white flex flex-col selection:bg-[#8FD3A5] selection:text-[#12301D] ${GeistSerif.className}`}
+      className={`site-shell relative isolate min-h-screen text-white flex flex-col selection:bg-[#8FD3A5] selection:text-[#12301D] ${GeistSerif.className}`}
       style={{
         fontFamily: "var(--font-geist-serif), 'Geist Serif', Georgia, serif",
       }}
     >
+      <SiteBackground />
       {/* Top Banner & Header */}
-      <header className="border-b border-white/10 bg-[#214F2E] px-6 py-4 shadow-md sticky top-0 z-30">
+      <header className="border-b border-white/10 bg-[#102b1b]/85 backdrop-blur-xl px-6 py-4 shadow-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <a href="/" className="flex items-center gap-2 group">
@@ -526,7 +528,7 @@ export default function DashboardApp() {
       {/* Main Workspace */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col gap-6">
         {/* Hint Line */}
-        <div className="rounded-xl border border-white/15 bg-[#214F2E]/60 px-5 py-3 flex flex-wrap items-center justify-between text-xs font-serif text-white/80">
+        <div className="rounded-xl border border-white/15 bg-[#102b1b]/85 backdrop-blur-xl/60 px-5 py-3 flex flex-wrap items-center justify-between text-xs font-serif text-white/80">
           <div className="flex items-center gap-4">
             {unplacedReceivers.length > 0 ? (
               <span className="text-amber-300">⚠️ {unplacedReceivers.length} receivers not placed</span>
@@ -551,7 +553,7 @@ export default function DashboardApp() {
              ========================================================================= */
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Interactive Floor Plan Map (3 cols) */}
-            <div className="lg:col-span-3 rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl flex flex-col">
+            <div className="lg:col-span-3 rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-lg font-bold text-white">Live Floor Plan</h2>
@@ -594,7 +596,7 @@ export default function DashboardApp() {
             {/* Audience Sidebar: People List & Receivers (1 col) */}
             <div className="space-y-6">
               {/* People in Room */}
-              <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-5 shadow-xl">
+              <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-5 shadow-xl">
                 <h3 className="font-bold text-base text-white mb-3 flex items-center justify-between">
                   <span>People in Room</span>
                   <span className="font-serif text-xs bg-white/10 px-2 py-0.5 rounded-full text-[#8FD3A5]">
@@ -638,7 +640,7 @@ export default function DashboardApp() {
               </div>
 
               {/* Receivers Status */}
-              <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-5 shadow-xl">
+              <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-5 shadow-xl">
                 <h3 className="font-bold text-base text-white mb-3">Receivers Status</h3>
                 <div className="space-y-2.5">
                   {state.nodes.map(node => (
@@ -695,7 +697,7 @@ export default function DashboardApp() {
             {/* TAB 1: Layout */}
             {debugSubTab === 'layout' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+                <div className="lg:col-span-2 rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                   <h3 className="text-lg font-bold text-white mb-2">Room Dimensions & Receiver Placement</h3>
                   <p className="text-xs text-white/70 mb-4">
                     Metres internally, shown in feet. Drag or type receiver coordinates.
@@ -761,7 +763,7 @@ export default function DashboardApp() {
                 </div>
 
                 {/* Receiver List & Coord Inputs */}
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl space-y-4">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl space-y-4">
                   <h4 className="font-bold text-sm text-white">Room Size (Feet)</h4>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -834,7 +836,7 @@ export default function DashboardApp() {
             {debugSubTab === 'calibrate' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Phone Setup & PIN */}
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl space-y-4">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl space-y-4">
                   <h3 className="text-lg font-bold text-white">Phone Calibration Connect</h3>
                   <div className="rounded-xl border border-white/15 bg-black/20 p-5 space-y-3">
                     <div className="flex items-center justify-between">
@@ -905,7 +907,7 @@ export default function DashboardApp() {
                 </div>
 
                 {/* Spot List */}
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                   <h3 className="text-lg font-bold text-white mb-2">Calibration Walks & Spots</h3>
                   <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
                     {state.calib?.spots && state.calib.spots.length > 0 ? (
@@ -937,7 +939,7 @@ export default function DashboardApp() {
             {/* TAB 3: Settings & Lab */}
             {debugSubTab === 'settings' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl space-y-5">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl space-y-5">
                   <h3 className="text-lg font-bold text-white">Filter & Tracking Switches</h3>
                   <div className="space-y-4">
                     {Object.entries(state.settings_info || {}).map(([key, [title, desc]]) => {
@@ -974,7 +976,7 @@ export default function DashboardApp() {
                 </div>
 
                 {/* Lab Benchmarking Table */}
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                   <h3 className="text-lg font-bold text-white mb-2">Lab Comparison Results</h3>
                   {state.lab?.rows && state.lab.rows.length > 0 ? (
                     <div className="overflow-x-auto">
@@ -1011,7 +1013,7 @@ export default function DashboardApp() {
             {/* TAB 4: Telemetry & Spark */}
             {debugSubTab === 'telemetry' && (
               <div className="space-y-6">
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                   <h3 className="text-lg font-bold text-white mb-4">Receiver Nodes Telemetry</h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left font-serif text-xs">
@@ -1054,7 +1056,7 @@ export default function DashboardApp() {
                 </div>
 
                 {/* Tracked Phones RSSI per Node */}
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                   <h3 className="text-lg font-bold text-white mb-4">Tracked Phones RSSI & Sparkline</h3>
                   <div className="space-y-4">
                     {state.phones.map(phone => (
@@ -1084,7 +1086,7 @@ export default function DashboardApp() {
 
             {/* TAB 5: Events Log */}
             {debugSubTab === 'events' && (
-              <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+              <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                 <h3 className="text-lg font-bold text-white mb-3">Events Log (Last 25)</h3>
                 <div className="space-y-2 font-serif text-xs max-h-96 overflow-y-auto">
                   {state.events && state.events.length > 0 ? (

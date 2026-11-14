@@ -3,7 +3,7 @@ import RidgelineMountains from "@/components/ui/ridgeline-mountains"
 
 export default function Footer() {
   return (
-    <footer data-moth-avoid className="w-full border-t border-white/10 bg-[#12301D] pt-12 text-center relative overflow-hidden">
+    <footer data-moth-avoid className="w-full border-t border-white/10 bg-[#0a1c11]/75 pt-12 text-center relative overflow-hidden">
       <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 px-6 md:px-16 mb-8 relative z-10">
         <div className="flex items-center gap-3">
           <MothLogo />

@@ -6,6 +6,7 @@ export default function Hero() {
       <div className="w-full">
         <MothWordmark
           word="Actias"
+          transparent
           fontFamily="'Geist Serif', Georgia, serif"
           preset="luna"
           palette={{
@@ -17,8 +18,6 @@ export default function Hero() {
           }}
         />
       </div>
-      {/* Seamless transition to page background */}
-      <div className="h-4 w-full bg-gradient-to-b from-transparent to-[#2E6F40] pointer-events-none -mt-4 relative z-10" />
     </section>
   )
 }

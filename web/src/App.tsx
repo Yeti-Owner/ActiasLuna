@@ -1,3 +1,4 @@
+import { SiteBackground } from "@/components/ui/site-background"
 import { GeistSerif } from "geist/font/serif"
 
 import Hero from "@/components/hero"
@@ -12,11 +13,12 @@ import Footer from "@/components/footer"
 export default function App() {
   return (
     <div
-      className={`min-h-screen bg-[#2E6F40] text-white flex flex-col selection:bg-[#8FD3A5] selection:text-[#12301D] ${GeistSerif.className}`}
+      className={`site-shell relative isolate min-h-screen text-white flex flex-col selection:bg-[#8FD3A5] selection:text-[#12301D] ${GeistSerif.className}`}
       style={{
         fontFamily: "var(--font-geist-serif), 'Geist Serif', Georgia, serif",
       }}
     >
+      <SiteBackground />
       {/* 1. Logo Hero (Top of site, full screen, 100svh) */}
       <Hero />
 

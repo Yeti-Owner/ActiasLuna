@@ -56,7 +56,7 @@ export default function SecurityPrivacySection() {
           <div
             data-moth-avoid
             key={i}
-            className={`rounded-xl border border-white/20 bg-[#214F2E] p-6 flex flex-col justify-between transition-all duration-300 hover:border-white/40 ${
+            className={`rounded-xl border border-white/20 bg-[#102b1b]/75 backdrop-blur-xl p-6 flex flex-col justify-between transition-all duration-300 hover:border-white/40 ${
               i === 6 ? "md:col-span-2 lg:col-span-1" : ""
             }`}
           >
