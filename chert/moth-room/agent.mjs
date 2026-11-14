@@ -26,6 +26,11 @@ const agent = defineAgent({
       llm: voiceBrain(),
     });
     ctx.addShutdownCallback(() => session.close());
+    // Diagnostics only (no behaviour change): log when the agent speaks/listens, so a call's log shows it talked.
+    const log = (...a) => console.log(JSON.stringify({ time: Date.now(), msg: `MOTH ${a.join(' ')}` }));
+    session.on('agent_state_changed', ev => log('agent', ev.oldState, '->', ev.newState));
+    session.on('user_state_changed', ev => log('caller', ev.oldState, '->', ev.newState));
+    session.on('error', ev => log('error', ev.error?.message || String(ev.error)));
     await session.start({
       room: ctx.room,
       agent: new voice.Agent({ instructions: instructionsFor(todayInTz()), tools }),

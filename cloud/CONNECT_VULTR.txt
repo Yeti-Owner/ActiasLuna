@@ -1,0 +1,75 @@
+================================================================
+  CONNECT VULTR  (move room history from the laptop to the cloud)
+================================================================
+Right now the room history runs ON THE LAPTOP (tools/local_cloud.py, http://127.0.0.1:8000).
+Everything else (uploader, Chert FaceTime agent) already works. Connecting Vultr is just:
+deploy the server, then point two config files at it. ~10 minutes.
+
+BEFORE YOU START
+  - The Vultr account must be approved (it was "pending review" on 2026-11-14).
+  - Do this on Nick's laptop (it has the SSH key and the agent folder).
+
+----------------------------------------------------------------
+1) CREATE THE SERVER  (my.vultr.com)
+----------------------------------------------------------------
+  Deploy +  ->  Cloud Compute - Shared CPU
+  Location: Atlanta     Image: Ubuntu 24.04 LTS     Plan: the cheapest one
+  SSH Keys: add this key (name it moth-vultr) and make sure it's CHECKED:
+    ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ0JJX/+wpmmwjZ3Z4aqSJSF9d4lhXn1a8KAuatm3MjZ moth-vultr
+  Hostname: moth-cloud      Paid add-ons: OFF      ->  Deploy Now
+  Copy the server's IP address when it says "Running".
+
+----------------------------------------------------------------
+2) INSTALL THE HISTORY API ON IT  (PowerShell, in the repo folder)
+----------------------------------------------------------------
+  scp -i $HOME\.ssh\moth_vultr cloud\moth_cloud.py cloud\deploy.sh root@YOUR_IP:/root/
+  ssh -i $HOME\.ssh\moth_vultr root@YOUR_IP "bash /root/deploy.sh America/New_York"
+
+  It prints:   URL  (https://YOUR-IP-WITH-DASHES.sslip.io)
+               INGEST token   (laptop: write-only)
+               QUERY token    (Chert agent: read-only)
+  Check:  curl https://YOUR-IP-WITH-DASHES.sslip.io/health    ->  {"ok": true}
+  Don't paste the tokens into chat or commit them.
+
+----------------------------------------------------------------
+3) POINT THE LAPTOP UPLOADER AT VULTR
+----------------------------------------------------------------
+  Edit  config\cloud.json  (git-ignored):
+    "url":          "https://YOUR-IP-WITH-DASHES.sslip.io"
+    "ingest_token": "<INGEST token>"
+    "query_token":  "<QUERY token>"
+    "room":         "demo-room"
+
+----------------------------------------------------------------
+4) POINT THE CHERT AGENT AT VULTR
+----------------------------------------------------------------
+  Edit  C:\Users\nicho\chert-moth\moth-room\.env.local :
+    MOTH_API_URL=https://YOUR-IP-WITH-DASHES.sslip.io
+    MOTH_QUERY_TOKEN=<QUERY token>
+
+----------------------------------------------------------------
+5) RESTART EVERYTHING
+----------------------------------------------------------------
+  Repo folder:         py tools/demo_run.py --button --cloud
+                       (--cloud sees a non-local URL, so it skips the local server
+                        and the uploader sends to Vultr)
+  chert-moth\moth-room (Node 24 on PATH: $env:Path = "C:\Users\nicho\node24;" + $env:Path):
+                       npm start
+                       npx @trychert/facetime@0.1.0-beta.21 dev --agent moth-room-nick --env-file .env.local
+
+----------------------------------------------------------------
+6) TEST
+----------------------------------------------------------------
+  - In chert-moth\moth-room:  node --env-file=.env.local test-tools.mjs
+      -> answers should come from Vultr (no "not connected" / "couldn't reach").
+  - FaceTime +1 (206) 465-5399 (Video, speaker on) and ask "Is anyone in my room?"
+
+NOTES
+  - History recorded on the laptop so far (data/moth_local.db) stays on the laptop; Vultr
+    starts fresh. That's fine for the demo.
+  - The demo Wi-Fi WATCHING-YOU has no internet: use USB tethering so the uploader can reach
+    Vultr and the agent can reach Chert / LiveKit / Gemini. (Uploads also queue on disk and
+    send later if the internet drops.)
+  - Optional later: run the agent + chert dev on the Vultr server too, so the room can be
+    FaceTimed even when the laptop is off.
+================================================================
