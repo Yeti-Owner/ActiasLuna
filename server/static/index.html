@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ActiasLuna</title>
+<link rel="stylesheet" href="/static/style.css">
+<script type="importmap">{"imports":{"three":"/static/lib/three/three.module.js","three/addons/":"/static/lib/three/addons/"}}</script>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="glyph">◐</span> ActiasLuna <span id="viewBadge" class="badge live">LIVE</span></div>
+  <div id="hdrInfo" class="muted"></div>
+  <div class="spacer"></div>
+  <span id="recBadge" class="badge"></span>
+  <button id="dimTog">3D view</button>
+  <button id="viewTog">Show replay</button>
+  <button id="modeTog">Setup &amp; debug</button>
+</header>
+<main>
+  <section id="left">
+    <h3>Boards</h3>
+    <table id="nodesT"></table>
+    <h3>Phones <span class="muted small">(joined to the demo network only)</span></h3>
+    <table id="phonesT"></table>
+    <div id="phoneDetail"></div>
+    <h3>Devices on the AP</h3>
+    <table id="staT"></table>
+    <div id="dropInfo" class="muted small"></div>
+  </section>
+
+  <section id="center">
+    <canvas id="map"></canvas>
+    <div id="view3d" class="hidden">
+      <div class="v3bar">
+        <button id="v3home">Angled</button><button id="v3top">Top down</button>
+        <span class="small muted">drag to orbit · scroll to zoom · right-drag to pan · tracking is on the floor (2D), drawn at chest height</span>
+      </div>
+      <div id="v3msg" class="hidden"></div>
+    </div>
+    <div id="legend">
+      <span><i class="lg measured"></i>calibration point</span>
+      <span><i class="lg est"></i>located (every board hears it)</span>
+      <span><i class="lg weak"></i>rough (under 3 boards)</span>
+      <span><i class="lg stale"></i>silent for over 3 s</span>
+      <span>shaded disc = uncertainty · map units are feet</span>
+    </div>
+    <div id="replayBar" class="hidden">
+      <button id="rpPause">Pause</button>
+      <select id="rpSpeed"><option>0.5</option><option selected>1</option><option>2</option><option>5</option><option>20</option></select>×
+      <progress id="rpProg" max="1" value="0"></progress><span id="rpTime" class="small"></span>
+      <button id="rpStop">End replay</button>
+    </div>
+  </section>
+
+  <section id="right">
+    <nav class="tabs">
+      <button data-tab="tLayout" class="on">Layout</button>
+      <button data-tab="tCal">Calibrate</button>
+      <button data-tab="tSet">Settings</button>
+      <button data-tab="tSess">Recordings</button>
+      <button data-tab="tEv">Log</button>
+    </nav>
+
+    <div id="tLayout" class="tab">
+      <label class="tog"><input type="checkbox" id="editTog"> Edit (drag boards and room corners)</label>
+      <div class="row">Room <input id="roomW" type="number" step="0.5" min="3" value="10"> ft ×
+        <input id="roomH" type="number" step="0.5" min="3" value="11"> ft <button id="roomRect">Make rectangle</button></div>
+      <div class="row"><button id="addVert">Add corner</button><button id="delVert">Remove selected corner</button></div>
+      <h4>Where the boards are</h4>
+      <div id="rxPlace"></div>
+      <div class="row"><button id="planBtn">Suggest board spots</button><button id="planUse" class="hidden">Use these</button><button id="planHide" class="hidden">Hide</button></div>
+      <div id="planMsg" class="small"></div>
+      <div class="row"><button id="saveLayout" class="primary">Save layout</button><span id="layoutMsg" class="small"></span></div>
+      <p class="small muted">Measure from one room corner (0,0, top-left on the map) to each board with a tape or a phone
+        measuring app. Six inches either way is fine. Saving rebuilds the radio map.</p>
+    </div>
+
+    <div id="tCal" class="tab hidden">
+      <div id="phoneCal" class="small callout"></div>
+      <ol class="small steps">
+        <li>On a phone joined to the demo network, open the address above and enter the PIN. Tap <b>Turn on motion</b>.</li>
+        <li><b>1 · Walk</b>: follow the numbered dots (roughly two minutes). Doing it twice helps.</li>
+        <li><b>2 · Check</b>: stand on each blue square for 8 seconds to measure the real error.</li>
+      </ol>
+      <h4>Accuracy</h4>
+      <div id="calQual" class="small"></div>
+      <h4>Calibration for this room</h4>
+      <div id="spotList" class="small"></div>
+      <button id="calClear" class="small">Delete everything and start again</button>
+      <h4>Phone-free tracking and compass</h4>
+      <div id="dfInfo" class="small"></div>
+      <button id="emptyGo" class="small">Record the empty room (15 s to leave, then 30 s)</button>
+    </div>
+
+    <div id="tSet" class="tab hidden">
+      <div id="setList"></div>
+      <h4>Which settings actually help?</h4>
+      <p class="small muted">Walk and do the checks on the phone while recording (on by default). This replays those
+        recordings with each setting flipped and scores them against where you really were. About a minute.</p>
+      <div class="row"><button id="labRun" class="primary">Measure on my recordings</button></div>
+      <div id="labOut" class="small"></div>
+    </div>
+
+    <div id="tSess" class="tab hidden">
+      <div class="row"><button id="recTog"></button><span id="recInfo" class="small"></span></div>
+      <h4>Saved recordings</h4>
+      <div id="sessList" class="small"></div>
+      <p class="small muted">Recordings hold raw telemetry only (times, board, MAC, signal strength). Replays run the
+        current layout and calibration over them. Delete them after a demo.</p>
+    </div>
+
+    <div id="tEv" class="tab hidden"><div id="evList" class="small mono"></div></div>
+  </section>
+
+  <section id="simple">
+    <h3>People</h3>
+    <div id="sPeople"></div>
+    <h3>Boards</h3>
+    <div id="sRx"></div>
+    <div id="sHint" class="small muted"></div>
+    <div class="slegend small muted">
+      <div><i class="lg est"></i>located (they're somewhere in the shaded disc)</div>
+      <div><i class="lg weak"></i>rough (fewer than 3 boards hear them)</div>
+      <div><i class="lg stale"></i>not heard lately</div>
+    </div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+<script type="module" src="/static/view3d.js"></script>
+</body>
+</html>

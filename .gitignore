@@ -1,14 +1,56 @@
+# Docs: keep only READMEs
+*.md
+!README.md
+
+# 3D scans / meshes
+mesh/
+*.glb
+*.gltf
+*.obj
+*.fbx
+*.stl
+*.ply
+*.usdz
+*.zip
+
+# Secrets (regenerate with tools/gen_secrets.py)
+config/network.json
+config/certs/
+firmware/luna_node/main/luna_secrets.h
+*.pem
+*.key
+.env
+
+# Personal data: recordings, calibration, device MACs
+data/
+config/crowd.json
+
+# ESP-IDF build output
+firmware/**/build*/
+firmware/**/sdkconfig
+firmware/**/sdkconfig.old
+firmware/**/managed_components/
+firmware/**/dependencies.lock
+
 # Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
 
-# OS / editor
+# Logs, backups, scratch
+*.log
+*.bak
+*.tmp
+*.out
+
+# Editors / OS
+.vscode/
+.idea/
+.claude/
+*.swp
 .DS_Store
 Thumbs.db
-
-# Moth runtime data (generated, not source)
-data/sessions/
-data/scan/sample/
+desktop.ini
