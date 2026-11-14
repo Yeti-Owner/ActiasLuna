@@ -47,9 +47,9 @@ RADIO_MIN_PKTS = 4
 RADIO_MIN_FRAMES = 6
 # Only the radio says moving while the phone says still: a slow walk, or a turn on the spot re-reading one fade, so
 # those readings count half. Hand sway alone exceeds RADIO_ON_DB on 44% of standing ticks (vs 88% of walking ones,
-# measured on recorded marks and legs), so overruling the phone's "still" needs RADIO_OVERRULE_DB (2% of standing).
+# measured on recorded marks and legs), so overruling the phone's "still" needs a clear RADIO_OVERRULE_DB.
 RADIO_ONLY_STRENGTH = 0.5
-RADIO_OVERRULE_DB = 4.5
+RADIO_OVERRULE_DB = 6.0
 STRIDE_M = 0.7
 RECEIVERS_S = 2.0
 # A window with this many packets from one board (a dwell) uses the median packet so a passer-by's brief shadow

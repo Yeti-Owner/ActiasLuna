@@ -23,8 +23,8 @@ import radiomap as rmap
 
 # Information rate while moving: fraction of a full likelihood per second of new readings (successive windows share
 # the map's local error, so they are not independent).
-K_RATE = 2.0
-MOVING_SPEED = 1.0
+K_RATE = 1.2
+MOVING_SPEED = 0.6
 UNKNOWN_SPEED = 0.6
 # Standing still: the belief held at the stop spreads by SD_STILL * sqrt(seconds) (drift, small shuffles) and is
 # multiplied once by the likelihood of the dwell's readings over at most STILL_WIN_S.
@@ -33,7 +33,7 @@ STILL_WIN_S = 10.0
 STILL_MAX_S = 60.0
 # A long dwell is worth a bit more than one reading (hands sway, the room changes): its weight grows by one per
 # STILL_GAIN_S, so a wrong fix held at the stop is eventually overruled by what the boards hear.
-STILL_GAIN_S = 15.0
+STILL_GAIN_S = 40.0
 # "Still" is only the phone's claim (slow walking can stay under its threshold). If board readings drift apart by
 # STILL_BREAK_DB since the dwell began, the dwell restarts from the current belief spread by BREAK_SD_M.
 STILL_BREAK_DB = 12.0
@@ -65,7 +65,7 @@ WINDOW_MAX_S = 6.0
 # prior, so one still landing OFF_JUMP sd away means the phone changed (pocketed, regripped): the prior re-opens fully
 # and, being wide, re-learns fast. Offset and "far from every board" look alike, so learning from a vague fix would
 # feed on itself: the offset only moves while the belief's spread is under OFF_LEARN_UNC_M.
-OFF_TAU_S = 20.0
+OFF_TAU_S = 40.0
 OFF_SD_MIN = 5.0
 OFF_JUMP = 1.5
 OFF_LEARN_UNC_M = 0.6
