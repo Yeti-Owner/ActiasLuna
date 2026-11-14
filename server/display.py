@@ -12,7 +12,7 @@ SMOOTH_BETA = 2.0
 SMOOTH_D_CUTOFF_HZ = 1.0
 SMOOTH_UNC_ALPHA = 0.15
 SMOOTH_RESET_GAP_S = 10.0
-SMOOTH_LEASH_M = 0.15
+SMOOTH_LEASH_M = 0.05
 
 
 def _blend(cutoff_hz: float, dt: float) -> float:
@@ -41,7 +41,7 @@ class PointSmoother:
         self.vx = self.vy = 0.0
         self.shown_x, self.shown_y = x, y
 
-    def __call__(self, x: float, y: float, unc: float, t: float, leash_scale: float = 1.0):
+    def __call__(self, x: float, y: float, unc: float, t: float):
         if self.last_t is None or t <= self.last_t or t - self.last_t > SMOOTH_RESET_GAP_S:
             self._reset(x, y, unc, t)
             return x, y, unc
@@ -56,7 +56,7 @@ class PointSmoother:
         self.unc += SMOOTH_UNC_ALPHA * (unc - self.unc)
 
         gap = math.hypot(self.fx - self.shown_x, self.fy - self.shown_y)
-        slack = SMOOTH_LEASH_M * leash_scale
+        slack = SMOOTH_LEASH_M
         if gap > slack:
             pull = (gap - slack) / gap
             self.shown_x += pull * (self.fx - self.shown_x)

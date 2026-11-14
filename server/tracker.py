@@ -30,7 +30,6 @@ LINK_ALPHA = 0.02
 STATUS_HOLD_S = 1.5
 DEMO_UNC_SCALE = 0.75
 WALK_MAX_S = 600.0
-STILL_LEASH_SCALE = 3.0
 # Each link keeps a fast level beside its slow baseline. While the fast level is LINK_DROP_DB below the baseline
 # (someone standing in the link) the baseline barely moves, so sensing and the map keep the empty-room value.
 LINK_FAST_ALPHA = 0.4
@@ -423,6 +422,11 @@ class Tracker:
         """Logged reports with t0 <= rt <= t1 as [rt - t0, steps, compass, moving] (walkcal.leg_fit's shape)."""
         return [[round(r[0] - t0, 3)] + r[1:] for r in self.motion_log.get(mac, ()) if t0 <= r[0] <= t1]
 
+    def samples_between(self, mac: str, t0: float, t1: float) -> List[list]:
+        """This phone's readings with t0 <= rt <= t1 as capture samples [rt - t0, board, frames, rssi, sd]."""
+        ph = self.phones.get(mac)
+        return [[round(s[0] - t0, 3), s[1], s[2], s[3], s[4]] for s in (ph.samples if ph else ()) if t0 <= s[0] <= t1]
+
     def anchor(self, mac: str, x: float, y: float, t: float):
         """The holder marked where they stand ("mark_anchor" setting). Recorded, so replays do the same."""
         ctx = self.get_ctx()
@@ -474,11 +478,11 @@ class Tracker:
         prev, ph.steps_seen = ph.steps_seen, steps
         return steps - prev if prev is not None and steps > prev else 0
 
-    def _display(self, ph: Phone, m, demo: bool, mv: int, t: float):
+    def _display(self, ph: Phone, m, demo: bool, t: float):
         x, y, unc = ph.raw["x"], ph.raw["y"], ph.raw["unc"]
         if not demo:
             return x, y, unc
-        sx, sy, su = ph.smoother(x, y, unc, t, STILL_LEASH_SCALE if mv == 0 else 1.0)
+        sx, sy, su = ph.smoother(x, y, unc, t)
         if rmap.point_in_poly(sx, sy, m.poly):
             x, y = sx, sy
         return x, y, max(rmap.FT, DEMO_UNC_SCALE * su)
@@ -552,7 +556,7 @@ class Tracker:
             return True
         full = ph.receivers >= min(3, len(m.nodes))
         self._set_status(ph, Status.ESTIMATED if full else Status.WEAK, t)
-        x, y, unc = self._display(ph, m, st["smoothing"], mv, t)
+        x, y, unc = self._display(ph, m, st["smoothing"], t)
         raw = ph.raw
         ph.est = {"x": x, "y": y, "unc": unc, "raw": [round(raw["x"], 3), round(raw["y"], 3), round(raw["unc"], 3)],
                   "receivers": ph.receivers, "mode": "calibrated" if m.spots else "uncalibrated",

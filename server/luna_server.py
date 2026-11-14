@@ -216,22 +216,21 @@ class App:
         # Raw walk captures. Walk spots, heading and stride derive from them (and from legs), so a new walkcal.VERSION
         # rebuilds them here instead of asking for another walk.
         calib.setdefault("walks", [])
-        # Walks between consecutive "I'm here" marks: compass and stride only (walkcal.leg_fit).
+        # Walks between consecutive "I'm here" marks: map spots (walkcal.leg_spots), compass and stride.
         calib.setdefault("legs", [])
-        if calib.get("walkcal_v") != walkcal.VERSION:
-            if calib["walks"]:
-                self._derive_walks(calib)
-            elif calib["legs"]:
-                self._refit_motion(calib)
-                calib["walkcal_v"] = walkcal.VERSION
+        if calib.get("walkcal_v") != walkcal.VERSION and (calib["walks"] or calib["legs"]):
+            self._derive_walks(calib)
         return calib
 
     @staticmethod
     def _derive_walks(calib: dict):
         ids = {w["id"] for w in calib["walks"]}
-        calib["spots"] = [s for s in calib["spots"] if s.get("group") not in ids]
+        calib["spots"] = [s for s in calib["spots"]
+                          if s.get("group") not in ids and not str(s.get("group", "")).startswith("leg:")]
         for walk in calib["walks"]:
             calib["spots"].extend(walkcal.walk_spots(walk, walk["id"]))
+        for leg in calib["legs"]:
+            calib["spots"].extend(walkcal.leg_spots(leg))
         App._refit_motion(calib)
         calib["walkcal_v"] = walkcal.VERSION
 
@@ -355,7 +354,9 @@ class App:
         prev = self.last_mark.get(phone)
         if prev and now - prev[0] <= walkcal.LEG_MAX_S:
             self.live.capture["leg"] = {"phone": phone, "t0": prev[0], "x0": prev[1], "y0": prev[2], "x1": x, "y1": y,
-                                        "motion": self.live.motion_between(phone, prev[0], now)}
+                                        "t1": round(now - prev[0], 3),
+                                        "motion": self.live.motion_between(phone, prev[0], now),
+                                        "samples": self.live.samples_between(phone, prev[0], now)}
         self.mark_results.pop(phone, None)
 
     def start_empty(self, phone: str):
@@ -538,6 +539,7 @@ class App:
         leg = cap.get("leg")
         if leg:
             self.calib["legs"] = (self.calib["legs"] + [leg])[-LEGS_KEEP:]
+            self.calib["spots"].extend(walkcal.leg_spots(leg))
         self._refit_motion(self.calib)
         self._save_calib()
         self._rebuild()
@@ -560,7 +562,8 @@ class App:
         self.calib["tests"] = [t for t in self.calib["tests"] if t.get("block") != block]
         legs = self.calib["legs"]
         if legs and legs[-1]["phone"] == phone and (legs[-1]["x1"], legs[-1]["y1"]) == (last["x"], last["y"]):
-            legs.pop()
+            gone = walkcal.leg_id(legs.pop())
+            self.calib["spots"] = [s for s in self.calib["spots"] if s.get("group") != gone]
         self._refit_motion(self.calib)
         self._save_calib()
         self._rebuild()

@@ -23,20 +23,20 @@ import radiomap as rmap
 
 # Information rate while moving: fraction of a full likelihood per second of new readings (successive windows share
 # the map's local error, so they are not independent).
-K_RATE = 1.2
+K_RATE = 2.0
 MOVING_SPEED = 1.0
 UNKNOWN_SPEED = 0.6
 # Standing still: the belief held at the stop spreads by SD_STILL * sqrt(seconds) (drift, small shuffles) and is
 # multiplied once by the likelihood of the dwell's readings over at most STILL_WIN_S.
 SD_STILL = 0.08
-STILL_WIN_S = 6.0
+STILL_WIN_S = 10.0
 STILL_MAX_S = 60.0
 # A long dwell is worth a bit more than one reading (hands sway, the room changes): its weight grows by one per
 # STILL_GAIN_S, so a wrong fix held at the stop is eventually overruled by what the boards hear.
 STILL_GAIN_S = 15.0
 # "Still" is only the phone's claim (slow walking can stay under its threshold). If board readings drift apart by
 # STILL_BREAK_DB since the dwell began, the dwell restarts from the current belief spread by BREAK_SD_M.
-STILL_BREAK_DB = 8.0
+STILL_BREAK_DB = 12.0
 STILL_BREAK_S = 1.5
 BREAK_SD_M = 0.4
 # Second dwell check: if the readings are e^LOST_NATS times less likely over the whole held belief than at the room's
@@ -47,8 +47,8 @@ LOST_MIX = 0.3
 # Steps + compass: each step moves the belief `stride` along the facing, adding PDR_SD_PER_M spread per metre.
 # "Moving" with no step for NOSTEP_S (slow walk below the step threshold, or only the radio noticed) creeps at NOSTEP_V
 # along the facing: slower than a walk, so a false alarm costs little.
-PDR_SD_PER_M = 0.35
-PDR_SD_MIN = 0.06
+PDR_SD_PER_M = 0.6
+PDR_SD_MIN = 0.15
 PDR_MAX_STEPS = 6
 NOSTEP_S = 1.0
 NOSTEP_V = 0.35
@@ -58,7 +58,7 @@ GAP_S = 3.0
 GAP_SD_MAX_M = 4.0
 # While not still, readings are folded in every MEAS_S over everything since the last fold (boards report every
 # 0.25 s, not in step with the tick). A slow phone accumulates up to WINDOW_MAX_S until two boards have MIN_FRAMES.
-MEAS_S = 0.5
+MEAS_S = 0.25
 WINDOW_MAX_S = 6.0
 # Phone offset (tx power, case, grip): starts unknown (rmap.DELTA_SD), then follows the posterior-mean offset with time
 # constant OFF_TAU_S while its prior tightens to OFF_SD_MIN. The solved offset is already pulled about halfway to the
@@ -68,7 +68,7 @@ WINDOW_MAX_S = 6.0
 OFF_TAU_S = 20.0
 OFF_SD_MIN = 5.0
 OFF_JUMP = 1.5
-OFF_LEARN_UNC_M = 1.0
+OFF_LEARN_UNC_M = 0.6
 SMOOTH_LAG_S = 3.0
 # A tapped position is good to about a step either way (finger on a small map, where exactly the phone is held).
 PIN_SD_M = 0.25
