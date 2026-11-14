@@ -144,12 +144,16 @@ def coverage(samples, t0, t1, max_gap=MAX_GAP_S):
 
 
 def _tz(name):
-    if ZoneInfo and name:
-        try:
-            return ZoneInfo(name)
-        except Exception:
-            pass
-    return datetime.timezone.utc
+    """The named timezone. Raises ValueError instead of silently falling back to UTC: a voice agent confidently
+    reading out times in the wrong timezone is worse than an error."""
+    if not name or name.upper() == "UTC":
+        return datetime.timezone.utc
+    if ZoneInfo is None:
+        raise ValueError("this Python has no zoneinfo; use tz=UTC or Python 3.9+")
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        raise ValueError(f"unknown timezone {name!r} (on Windows: pip install tzdata)")
 
 
 def _clock(t, tz):
@@ -312,7 +316,10 @@ def make_server(host, port, store, ingest_token, query_token, default_tz="UTC", 
             if not self._authed(query_token):
                 return self._send(401, {"error": "bad token"})
             q = {k: v[0] for k, v in parse_qs(url.query).items()}
-            tz = _tz(q.get("tz") or default_tz)
+            try:
+                tz = _tz(q.get("tz") or default_tz)
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
             room = q.get("room") or default_room or (store.rooms() or [None])[0]
             if not room or not ROOM_RE.match(room):
                 return self._send(400, {"error": "unknown room", "rooms": store.rooms()})
@@ -349,6 +356,10 @@ def main():
     ingest, query = os.environ.get("MOTH_INGEST_TOKEN", ""), os.environ.get("MOTH_QUERY_TOKEN", "")
     if len(ingest) < 16 or len(query) < 16 or ingest == query:
         raise SystemExit("Set MOTH_INGEST_TOKEN and MOTH_QUERY_TOKEN (16+ chars each, different).")
+    try:
+        _tz(args.tz)                     # fail at startup, not mid-call, if the default timezone can't load
+    except ValueError as exc:
+        raise SystemExit(f"--tz: {exc}")
     store = Store(args.db)
 
     def pruner():

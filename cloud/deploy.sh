@@ -12,7 +12,7 @@ HOST="${IP//./-}.sslip.io"          # sslip.io: a free hostname that resolves to
 
 echo "== installing python3 + caddy"
 apt-get update -qq
-apt-get install -y -qq python3 >/dev/null
+apt-get install -y -qq python3 tzdata >/dev/null   # tzdata: real local times in spoken answers
 HAVE_CADDY=1
 apt-get install -y -qq caddy >/dev/null 2>&1 || HAVE_CADDY=0
 

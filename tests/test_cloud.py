@@ -91,6 +91,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(now_out["status"], "empty")
         self.assertIn("last person left", now_out["answer"])
 
+    def test_unknown_timezone_is_an_error_not_utc(self):
+        self.store.add("lab", [{"t": time.time(), "in": 0}])
+        code, out = self.call("/api/now?room=lab&tz=Not/AZone")
+        self.assertEqual(code, 400)                            # never silently answer in the wrong timezone
+        self.assertIn("timezone", out["error"])
+
     def test_not_reporting_is_not_empty(self):
         self.store.add("lab", [{"t": time.time() - 600, "in": 0}])
         _, out = self.call("/api/now?room=lab")
