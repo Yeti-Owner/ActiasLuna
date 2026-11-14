@@ -75,9 +75,57 @@ code, kbd, samp, pre, .font-mono {
   transform-origin: center center;
 }
 
+@keyframes butterfly-float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) rotate(3deg) scale(1.03);
+  }
+}
+
+@keyframes bee-hover {
+  0%, 100% {
+    transform: translateY(0px) rotate(-6deg);
+  }
+  25% {
+    transform: translateY(-4px) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-7px) rotate(-8deg);
+  }
+  75% {
+    transform: translateY(-3px) rotate(-4deg);
+  }
+}
+
+@keyframes ladybug-perch {
+  0%, 100% {
+    transform: scale(1) rotate(14deg);
+  }
+  50% {
+    transform: scale(1.04) rotate(16deg);
+  }
+}
+
+.animate-butterfly {
+  animation: butterfly-float 5s ease-in-out infinite;
+}
+
+.animate-bee {
+  animation: bee-hover 3.2s ease-in-out infinite;
+}
+
+.animate-ladybug {
+  animation: ladybug-perch 4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-sun,
-  .animate-sun-peek {
+  .animate-sun-peek,
+  .animate-butterfly,
+  .animate-bee,
+  .animate-ladybug {
     animation: none;
   }
 }

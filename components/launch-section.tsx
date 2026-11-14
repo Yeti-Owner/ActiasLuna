@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react"
+import ladybugImg from "@/public/insects/ladybug.png"
 
 interface StateData {
   laptop_ip: string | null
@@ -43,7 +44,20 @@ export default function LaunchSection() {
 
   return (
     <section className="relative w-full max-w-5xl mx-auto px-6 md:px-16 py-16">
-      <div data-moth-avoid className="rounded-3xl border border-white/20 bg-[#214F2E] p-8 md:p-12 shadow-2xl">
+      <div data-moth-avoid className="relative rounded-3xl border border-white/20 bg-[#214F2E] p-8 md:p-12 shadow-2xl">
+        {/* Decorative Ladybug perched playfully on the top-right corner of the Launch card */}
+        <div className="absolute -top-5 -right-3 sm:-top-6 sm:-right-4 md:-top-7 md:-right-5 z-20 pointer-events-none select-none transition-transform duration-300 hover:scale-110">
+          <div className="relative animate-ladybug">
+            {/* Soft contact shadow beneath the ladybug */}
+            <div className="absolute inset-0 rounded-full bg-black/40 blur-xs translate-y-1" />
+            <img
+              src={ladybugImg}
+              alt="Little Ladybug perched on card"
+              className="relative w-11 h-11 sm:w-13 sm:h-13 md:w-16 md:h-16 object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.4)]"
+            />
+          </div>
+        </div>
+
         <div className="max-w-2xl mb-8">
           <span className="font-mono text-xs uppercase tracking-widest text-[#8FD3A5] mb-2 block">
             Live Demo

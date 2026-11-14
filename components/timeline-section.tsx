@@ -1,4 +1,5 @@
 import ScrollTimeline, { Milestone } from "@/components/ui/scroll-timeline"
+import butterflyImg from "@/public/insects/butterfly.png"
 
 const MOTH_MILESTONES: Milestone[] = [
   {
@@ -41,6 +42,22 @@ const MOTH_MILESTONES: Milestone[] = [
 export default function TimelineSection() {
   return (
     <section className="relative w-full max-w-5xl mx-auto pt-16 pb-20">
+      {/* Decorative Monarch Butterfly floating on the upper-right */}
+      <div
+        data-moth-avoid
+        className="absolute top-12 right-6 md:right-16 z-10 pointer-events-none select-none transition-transform duration-500 hover:scale-110"
+      >
+        <div className="relative animate-butterfly">
+          {/* Subtle golden ambient highlight */}
+          <div className="absolute -inset-2 rounded-full bg-amber-400/20 blur-lg" />
+          <img
+            src={butterflyImg}
+            alt="Monarch Butterfly"
+            className="relative w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 object-contain drop-shadow-[0_8px_16px_rgba(0,0,0,0.35)]"
+          />
+        </div>
+      </div>
+
       <div className="px-6 md:px-16 mb-8 text-left">
         <span data-moth-avoid className="font-mono text-xs uppercase tracking-widest text-white/60 mb-2 inline-block">
           Architecture

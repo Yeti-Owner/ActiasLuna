@@ -1,6 +1,24 @@
+import beeImg from "@/public/insects/bee.png"
+
 export default function TwoWaysSection() {
   return (
     <section className="relative w-full max-w-5xl mx-auto px-6 md:px-16 py-16">
+      {/* Decorative Bumblebee buzzing playfully on the right */}
+      <div
+        data-moth-avoid
+        className="absolute top-12 right-8 md:right-20 z-10 pointer-events-none select-none transition-transform duration-500 hover:scale-110"
+      >
+        <div className="relative animate-bee">
+          {/* Soft yellow pollen haze */}
+          <div className="absolute -inset-2 rounded-full bg-yellow-300/20 blur-md" />
+          <img
+            src={beeImg}
+            alt="Bumblebee"
+            className="relative w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 object-contain drop-shadow-[0_6px_14px_rgba(0,0,0,0.35)]"
+          />
+        </div>
+      </div>
+
       <div className="mb-10 text-left">
         <span data-moth-avoid className="font-mono text-xs uppercase tracking-widest text-white/60 mb-2 inline-block">
           Operation Modes
