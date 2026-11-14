@@ -165,7 +165,7 @@ class App:
         self.lock = threading.RLock()
         self.state = read_json(DATA / "state.json", {})
         self.settings = cfg.merged(self.state.get("settings"))
-        self.layout = self._valid_layout(read_json(DATA / "layouts" / "current.json", None))
+        self.layout = self._initial_layout()
         self.calib = self._load_calib(self.calib_name())
         self.lab = {"state": "idle"}
         self.blocked = []
@@ -210,6 +210,15 @@ class App:
         # mac -> outcome of that phone's latest mark, shown on its page (phone_state "result").
         self.mark_results = {}
         self._rebuild()
+
+    @staticmethod
+    def _initial_layout():
+        saved = read_json(DATA / "layouts" / "current.json", None)
+        if saved is None:
+            scan = read_json(DATA / "scan" / "room.json", {})
+            if isinstance(scan, dict) and scan.get("polygon"):
+                saved = {"name": "scanned-room", "polygon": scan["polygon"], "receivers": {}}
+        return App._valid_layout(saved)
 
     @staticmethod
     def _valid_layout(raw):
