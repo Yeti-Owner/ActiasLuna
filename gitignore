@@ -1,0 +1,55 @@
+# Docs: keep only READMEs
+*.md
+!README.md
+
+# 3D scans / meshes
+mesh/
+*.glb
+*.gltf
+*.obj
+*.fbx
+*.stl
+*.ply
+*.usdz
+*.zip
+
+# Secrets (regenerate with tools/gen_secrets.py)
+config/network.json
+config/certs/
+firmware/moth_node/main/moth_secrets.h
+*.pem
+*.key
+.env
+
+# Personal data: recordings, calibration, device MACs
+data/
+config/crowd.json
+
+# ESP-IDF build output
+firmware/**/build*/
+firmware/**/sdkconfig
+firmware/**/sdkconfig.old
+firmware/**/managed_components/
+firmware/**/dependencies.lock
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Logs, backups, scratch
+*.log
+*.bak
+*.tmp
+*.out
+
+# Editors / OS
+.vscode/
+.idea/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
