@@ -14,21 +14,10 @@ export default function Hero() {
             moth:   "#FFFFFF",   // white moths
             ink:    "#12301D",   // --forest-ink: reeds
           }}
-        >
-          {/* Optional overlay: keep it small and away from the middle of the screen so it never covers the word */}
-          <div className="flex h-full flex-col items-center justify-end pb-24 text-center pointer-events-none">
-            <p className="max-w-xl px-6 text-base text-white/80 md:text-lg select-none">
-              Indoor positioning from Wi-Fi signals alone. No app, no GPS, no cameras.
-            </p>
-            <span className="mt-4 animate-pulse font-mono text-xs uppercase tracking-widest text-white/60 select-none">
-              Scroll down ↓
-            </span>
-          </div>
-        </MothWordmark>
+        />
       </div>
-      {/* Seamless transition if needed to page background */}
+      {/* Seamless transition to page background */}
       <div className="h-4 w-full bg-gradient-to-b from-transparent to-[#2E6F40] pointer-events-none -mt-4 relative z-10" />
     </section>
   )
 }
-
