@@ -13,6 +13,7 @@ import os
 import re
 import socket
 import ssl
+import subprocess
 import sys
 import threading
 import time
@@ -614,10 +615,13 @@ class App:
                 self.rec_count = 0
                 self._write_rec({"type": "header", "started": time.time(), "layout": self.layout,
                                  "calibration": self.calib["name"]}, compact=False)
-                self._write_rec({"rt": time.time(), "meta": {"laptop_ip": self.live.laptop_ip}})
+                self._write_rec({"rt": time.time(), "meta": self._meta()})
             elif not on and self.rec_file:
                 self.rec_file.close()
                 self.rec_file = None
+
+    def _meta(self) -> dict:
+        return {"laptop_ip": self.live.laptop_ip, "laptop_macs": sorted(self.live.laptop_macs)}
 
     def record(self, rt, src, pkt):
         if not self.rec_file:
@@ -705,14 +709,21 @@ class App:
         socket's port, so replies pass the firewall as return traffic. --targets (simulator) replaces both."""
         port = int(self.net.get("node_port", 5006))
         broadcast = self.demo_prefix() + "255"
+        macs_due = 0.0
         while True:
             msg = self._sub_message()
             ip = self.laptop_ip()
+            # Re-read now and then: Windows can give the Wi-Fi card a different random MAC on each network.
+            macs = own_macs() if time.monotonic() >= macs_due else set()
+            if macs:
+                macs_due = time.monotonic() + 10.0
             with self.lock:
-                if ip != self.live.laptop_ip:
-                    self._write_rec({"rt": time.time(), "meta": {"laptop_ip": ip}})
-                    self._note(f"laptop on demo Wi-Fi as {ip}" if ip else "laptop is NOT on the demo Wi-Fi")
-                self.live.laptop_ip = ip
+                if ip != self.live.laptop_ip or not macs <= self.live.laptop_macs:
+                    if ip != self.live.laptop_ip:
+                        self._note(f"laptop on demo Wi-Fi as {ip}" if ip else "laptop is NOT on the demo Wi-Fi")
+                    self.live.laptop_ip = ip
+                    self.live.laptop_macs |= macs
+                    self._write_rec({"rt": time.time(), "meta": self._meta()})
                 dests = set(self.targets) if self.targets else {(addr, port) for addr in self.known_nodes}
             if ip and not self.targets:
                 dests.add((broadcast, port))
@@ -1291,6 +1302,23 @@ PHONE_POST = {
     "/api/walk/stop": lambda a, b, mac, mine: a.live.stop_walk() if mine else None,
     "/api/cancel": lambda a, b, mac, mine: a.live.cancel_capture() if mine else None,
 }
+
+
+def own_macs() -> set:
+    """This laptop's network-card MACs as 12 lowercase hex digits (empty if the OS won't say)."""
+    text = ""
+    try:
+        if sys.platform == "win32":
+            text = subprocess.run(["getmac", "/fo", "csv", "/nh"], capture_output=True, text=True, timeout=5,
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        elif sys.platform == "darwin":
+            text = subprocess.run(["ifconfig"], capture_output=True, text=True, timeout=5).stdout
+        else:
+            text = "\n".join(p.read_text() for p in Path("/sys/class/net").glob("*/address"))
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    found = {re.sub(r"[^0-9a-f]", "", m.lower()) for m in re.findall(r"(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}", text)}
+    return found - {"000000000000", "ffffffffffff"}
 
 
 def _start_phone_server(port: int):

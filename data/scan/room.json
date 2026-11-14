@@ -1,81 +1,366 @@
 {
- "source": "11_13_2026.zip",
- "kind": "mesh",
+ "source": "11_14_2026.zip",
+ "kind": "roomplan",
+ "rotate": 0,
  "polygon": [
   [
-   0,
-   0
+   0.0,
+   0.0
   ],
   [
-   4.33,
-   0
+   3.736,
+   0.0
   ],
   [
-   4.33,
-   3.499
+   3.736,
+   4.77
   ],
   [
-   0,
-   3.499
+   0.0,
+   4.77
   ]
  ],
- "ceiling_m": 2.518,
+ "ceiling_m": 2.636,
  "transform": {
-  "yaw": -0.009182,
-  "x0": -2.1599,
-  "z0": -1.7543,
-  "floor_y": -0.9582
+  "yaw": 0.0,
+  "x0": -1.868,
+  "z0": -2.385,
+  "floor_y": 0.001
  },
  "objects": [
   {
-   "label": "Desk",
-   "guessed": true,
-   "height": 0.74,
+   "label": "Table",
+   "name": "table_dining_rect_0",
+   "height": 0.82,
    "footprint": [
     [
-     1.9,
-     0.0
+     0.969,
+     2.052
     ],
     [
-     3.15,
-     0.0
+     2.578,
+     2.052
     ],
     [
-     3.15,
-     1.7
+     2.578,
+     4.545
     ],
     [
-     1.9,
-     1.7
+     0.969,
+     4.545
     ]
-   ],
-   "name": "Desk_0"
+   ]
   },
   {
-   "label": "Desk",
-   "guessed": true,
-   "height": 0.67,
+   "label": "Chair",
+   "name": "chair_swivel_star_back_no_7",
+   "height": 0.85,
    "footprint": [
     [
-     0.0,
-     0.0
+     1.11,
+     1.855
     ],
     [
-     0.8,
-     0.0
+     1.632,
+     1.855
     ],
     [
-     0.8,
-     1.1
+     1.632,
+     2.417
     ],
     [
-     0.0,
-     1.1
+     1.11,
+     2.417
     ]
-   ],
-   "name": "Desk_1"
+   ]
+  },
+  {
+   "label": "Chair",
+   "name": "chair_swivel_star_back_no_0",
+   "height": 0.85,
+   "footprint": [
+    [
+     2.213,
+     3.868
+    ],
+    [
+     2.774,
+     3.868
+    ],
+    [
+     2.774,
+     4.39
+    ],
+    [
+     2.213,
+     4.39
+    ]
+   ]
+  },
+  {
+   "label": "Chair",
+   "name": "chair_swivel_star_back_no_1",
+   "height": 0.85,
+   "footprint": [
+    [
+     0.773,
+     3.868
+    ],
+    [
+     1.334,
+     3.868
+    ],
+    [
+     1.334,
+     4.39
+    ],
+    [
+     0.773,
+     4.39
+    ]
+   ]
+  },
+  {
+   "label": "Chair",
+   "name": "chair_swivel_star_back_no_2",
+   "height": 0.85,
+   "footprint": [
+    [
+     2.213,
+     3.037
+    ],
+    [
+     2.774,
+     3.037
+    ],
+    [
+     2.774,
+     3.559
+    ],
+    [
+     2.213,
+     3.559
+    ]
+   ]
+  },
+  {
+   "label": "Chair",
+   "name": "chair_swivel_star_back_no_4",
+   "height": 0.85,
+   "footprint": [
+    [
+     2.213,
+     2.206
+    ],
+    [
+     2.774,
+     2.206
+    ],
+    [
+     2.774,
+     2.728
+    ],
+    [
+     2.213,
+     2.728
+    ]
+   ]
+  },
+  {
+   "label": "Chair",
+   "name": "chair_swivel_star_back_no_6",
+   "height": 0.85,
+   "footprint": [
+    [
+     0.773,
+     3.037
+    ],
+    [
+     1.334,
+     3.037
+    ],
+    [
+     1.334,
+     3.559
+    ],
+    [
+     0.773,
+     3.559
+    ]
+   ]
+  },
+  {
+   "label": "Chair",
+   "name": "chair_swivel_star_back_no_8",
+   "height": 0.85,
+   "footprint": [
+    [
+     0.773,
+     2.206
+    ],
+    [
+     1.334,
+     2.206
+    ],
+    [
+     1.334,
+     2.728
+    ],
+    [
+     0.773,
+     2.728
+    ]
+   ]
+  },
+  {
+   "label": "Chair",
+   "name": "chair_swivel_star_back_no_3",
+   "height": 0.85,
+   "footprint": [
+    [
+     1.915,
+     1.855
+    ],
+    [
+     2.436,
+     1.855
+    ],
+    [
+     2.436,
+     2.417
+    ],
+    [
+     1.915,
+     2.417
+    ]
+   ]
+  },
+  {
+   "label": "Chair",
+   "name": "chair_swivel_star_back_no_5",
+   "height": 0.85,
+   "footprint": [
+    [
+     0.122,
+     0.061
+    ],
+    [
+     0.613,
+     0.061
+    ],
+    [
+     0.613,
+     0.584
+    ],
+    [
+     0.122,
+     0.584
+    ]
+   ]
+  },
+  {
+   "label": "Chair",
+   "name": "chair_swivel_star_back_arms_1",
+   "height": 0.84,
+   "footprint": [
+    [
+     0.725,
+     0.067
+    ],
+    [
+     1.221,
+     0.067
+    ],
+    [
+     1.221,
+     0.577
+    ],
+    [
+     0.725,
+     0.577
+    ]
+   ]
+  },
+  {
+   "label": "Chair",
+   "name": "chair_swivel_star_back_arms_0",
+   "height": 0.91,
+   "footprint": [
+    [
+     1.408,
+     0.164
+    ],
+    [
+     1.884,
+     0.164
+    ],
+    [
+     1.884,
+     0.671
+    ],
+    [
+     1.408,
+     0.671
+    ]
+   ]
+  },
+  {
+   "label": "TV",
+   "name": "television_0",
+   "height": 1.51,
+   "footprint": [
+    [
+     1.205,
+     4.431
+    ],
+    [
+     2.362,
+     4.431
+    ],
+    [
+     2.362,
+     4.531
+    ],
+    [
+     1.205,
+     4.531
+    ]
+   ]
   }
  ],
- "openings": [],
- "keep_nodes": []
+ "openings": [
+  {
+   "kind": "door",
+   "name": "Door_0",
+   "bottom": 0.0,
+   "top": 2.17,
+   "footprint": [
+    [
+     2.509,
+     0.001
+    ],
+    [
+     3.361,
+     0.001
+    ]
+   ]
+  }
+ ],
+ "keep_nodes": [
+  "Floor_Office",
+  "Door_0",
+  "television_0",
+  "chair_swivel_star_back_no_0",
+  "chair_swivel_star_back_no_1",
+  "chair_swivel_star_back_no_2",
+  "chair_swivel_star_back_arms_0",
+  "chair_swivel_star_back_no_3",
+  "chair_swivel_star_back_no_4",
+  "chair_swivel_star_back_no_5",
+  "chair_swivel_star_back_no_6",
+  "chair_swivel_star_back_no_7",
+  "chair_swivel_star_back_no_8",
+  "chair_swivel_star_back_arms_1",
+  "table_dining_rect_0"
+ ]
 }

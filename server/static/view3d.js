@@ -9,7 +9,7 @@ const PERSON_H = 4.0 * FT;
 const BOARD_H = 2.5 * FT;
 const BG = 0x090b16;
 const GREY = 0x7a819c;
-const FURNITURE = { Bed: 0x7d6bb0, Desk: 0x8c6c4a, Chair: 0x50698a, Bookshelf: 0x7c5c3a, Dresser: 0x6c5242, Sofa: 0x5c6c94 };
+const FURNITURE = { Bed: 0x7d6bb0, Desk: 0x8c6c4a, Table: 0x8c6c4a, Chair: 0x50698a, Bookshelf: 0x7c5c3a, Dresser: 0x6c5242, Cabinet: 0x6c5242, Sofa: 0x5c6c94, TV: 0x3a3f52 };
 const STATUS = { online: 0x8fdcb2, stale: 0xe6b24c, offline: 0xee6a73 };
 
 function labelSprite(text, { size = 0.16, color = "#e7eaf6", bg = "rgba(12,15,28,0.78)" } = {}) {
@@ -101,11 +101,6 @@ class RoomView {
     this.home = { target: new THREE.Vector3(cx, 0.6, cz), pos: new THREE.Vector3(cx + span * 0.15, span * 1.15, cz + span * 1.25) };
     if (!this.cameraPlaced) { this.resetView(); this.cameraPlaced = true; }
 
-    if (scan && scan.kind === "mesh") {
-      try { await this.loadMeshScan(scan, layout.polygon); return; }
-      catch (e) { console.warn("room scan failed to load, drawing the outline instead", e); this.roomG.clear(); }
-    }
-
     const grid = [];
     for (let f = 0; f * FT <= b.x1 + 1e-6; f++) grid.push(f * FT, 0.004, b.y0, f * FT, 0.004, b.y1);
     for (let f = 0; f * FT <= b.y1 + 1e-6; f++) grid.push(b.x0, 0.004, f * FT, b.x1, 0.004, f * FT);
@@ -113,44 +108,11 @@ class RoomView {
     gridGeo.setAttribute("position", new THREE.Float32BufferAttribute(grid, 3));
     this.roomG.add(new THREE.LineSegments(gridGeo, new THREE.LineBasicMaterial({ color: 0x252d4a, transparent: true, opacity: 0.7 })));
 
-    if (scan && scan.kind !== "mesh") {
+    if (scan && scan.transform) {
       try { await this.loadScan(scan, b); return; }
       catch (e) { console.warn("room scan failed to load, drawing the outline instead", e); this.roomG.clear(); }
     }
     this.outlineRoom(layout.polygon);
-  }
-
-  // Textured photogrammetry mesh from tools/import_scan.py. Lighting is baked into the photos, so it is drawn unlit.
-  // Its normals face into the room: front faces only drops the ceiling and the walls nearest the camera (cut-away view).
-  // The mesh is in the scan's frame; if the layout outline differs, the layout is drawn on top so the mismatch shows.
-  async loadMeshScan(scan, layoutPoly) {
-    const gltf = await new GLTFLoader().loadAsync("/scan.glb");
-    const root = gltf.scene, t = scan.transform;
-    const holder = new THREE.Group();
-    root.rotation.y = t.yaw || 0;
-    holder.position.set(-t.x0, -t.floor_y, -t.z0);
-    holder.add(root);
-    this.roomG.add(holder);
-    root.traverse((o) => {
-      if (!o.isMesh) return;
-      const old = o.material;
-      o.material = new THREE.MeshBasicMaterial({ map: old.map, side: THREE.FrontSide });
-      old.dispose();
-    });
-    const same = JSON.stringify(scan.polygon.map((p) => p.map((v) => v.toFixed(2)))) === JSON.stringify(layoutPoly.map((p) => p.map((v) => v.toFixed(2))));
-    if (!same) {
-      const pts = layoutPoly.concat([layoutPoly[0]]).map((p) => new THREE.Vector3(p[0], 0.03, p[1]));
-      this.roomG.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xee6a73, depthTest: false })));
-      const tag = labelSprite("layout outline (doesn't match scan)", { size: 0.12, color: "#ee6a73" });
-      tag.position.set(layoutPoly[0][0], 0.2, layoutPoly[0][1]);
-      this.roomG.add(tag);
-    }
-    for (const o of scan.objects || []) {
-      const fx = o.footprint.map((p) => p[0]), fy = o.footprint.map((p) => p[1]);
-      const tag = labelSprite(o.label, { size: 0.12, color: "#cdd3e8", bg: "rgba(12,15,28,0.55)" });
-      tag.position.set((Math.min(...fx) + Math.max(...fx)) / 2, (o.height || 0.8) + 0.15, (Math.min(...fy) + Math.max(...fy)) / 2);
-      this.roomG.add(tag);
-    }
   }
 
   outlineRoom(poly) {
@@ -169,20 +131,23 @@ class RoomView {
     });
   }
 
-  // The scan mesh is shifted by room.json's transform; other rooms in it are hidden through keep_nodes and clipping
-  // planes at this room's bounds.
+  // Room-mode scan from tools/import_scan.py, placed by room.json's transform (rotation.y = yaw, then shifted). Other
+  // rooms in it are hidden through keep_nodes and clipping planes at this room's bounds.
   async loadScan(scan, b) {
     const gltf = await new GLTFLoader().loadAsync("/scan.glb");
     const root = gltf.scene, t = scan.transform, margin = 0.12;
-    root.position.set(-t.x0, -t.floor_y, -t.z0);
+    const holder = new THREE.Group();
+    root.rotation.y = t.yaw || 0;
+    holder.position.set(-t.x0, -t.floor_y, -t.z0);
+    holder.add(root);
     const clip = [
       new THREE.Plane(new THREE.Vector3(1, 0, 0), -(b.x0 - margin)), new THREE.Plane(new THREE.Vector3(-1, 0, 0), b.x1 + margin),
       new THREE.Plane(new THREE.Vector3(0, 0, 1), -(b.y0 - margin)), new THREE.Plane(new THREE.Vector3(0, 0, -1), b.y1 + margin),
     ];
     const keep = new Set(scan.keep_nodes), byName = {};
     for (const o of scan.objects || []) byName[o.name] = o;
-    this.roomG.add(root);
-    root.updateMatrixWorld(true);
+    this.roomG.add(holder);
+    holder.updateMatrixWorld(true);
     const box = new THREE.Box3();
     const room = new THREE.Box3(new THREE.Vector3(b.x0 - 0.3, -1, b.y0 - 0.3), new THREE.Vector3(b.x1 + 0.3, 4, b.y1 + 0.3));
     const meshes = [];

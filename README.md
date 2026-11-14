@@ -54,8 +54,8 @@ cd ../..
 cd web && npm install && cd ..                         # only for the web frontend
 ```
 
-Room scan: on the dashboard open Setup → Room → *Import room scan* (.glb, or a .zip holding one). It measures the
-outline and furniture, sizes the layout and puts the scan in the 3D view (*Turn 90°* if the corners don't line up;
+Room scan: on the dashboard open Setup → Room → *Import room scan* (.glb, or a .zip holding one, exported in room mode
+so walls, doors and furniture are labelled). It reads the floor outline, doors and furniture, sizes the layout and puts the scan in the 3D view (*Turn 90°* if the corners don't line up;
 `python tools/import_scan.py scan.zip --set-layout` does the same). The scan lives in `data/scan/` and is committed;
 the rest of `data/` (layout, calibration, recordings) stays on each laptop.
 

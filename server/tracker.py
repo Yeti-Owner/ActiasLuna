@@ -161,6 +161,9 @@ class Tracker:
         self.events: deque = deque(maxlen=60)
         self.dropped_unassoc = 0
         self.laptop_ip: Optional[str] = None
+        # The laptop's own Wi-Fi MACs. The AP lists a station before DHCP gives it an IP (ip 0.0.0.0), so matching the
+        # laptop by laptop_ip alone lets it be tracked as a phone for those first seconds.
+        self.laptop_macs: set = set()
         self.now = 0.0
         self.capture: Optional[dict] = None
         self.on_capture_done: Optional[Callable[[dict], None]] = None
@@ -188,8 +191,8 @@ class Tracker:
         return {n.ifm: n.id for n in self.nodes.values() if n.ifm}
 
     def excluded(self) -> set:
-        """Never tracked as phones: boards (id and on-air MAC) and the laptop (by its IP)."""
-        out = set()
+        """Never tracked as phones: boards (id and on-air MAC) and the laptop (its MACs, and whatever holds its IP)."""
+        out = set(self.laptop_macs)
         for node in self.nodes.values():
             out.add(node.id)
             if node.ifm:
@@ -564,6 +567,8 @@ class Tracker:
         self.rssi_key = "q3" if st["robust_rssi"] else "r"
         m = ctx.get("map")
         self._body_tick(t, ctx, st)
+        for mac in self.excluded() & self.phones.keys():   # tracked before it was known to be a board or the laptop
+            del self.phones[mac]
         fuse = self.body_ll if st["fuse_body"] and len(self.phones) == 1 else None
         for mac in list(self.phones):
             if not self._phone_tick(mac, self.phones[mac], t, ctx, st, m, fuse):

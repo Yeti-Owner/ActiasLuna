@@ -52,7 +52,9 @@ def apply(tr: Tracker, line: dict):
     and {"rt", "src", "p": packet}.
     """
     if "meta" in line:
-        tr.laptop_ip = (line["meta"] or {}).get("laptop_ip")
+        meta = line["meta"] or {}
+        tr.laptop_ip = meta.get("laptop_ip")
+        tr.laptop_macs.update(str(m).lower() for m in meta.get("laptop_macs") or [])
     elif "motion" in line:
         mo = line["motion"] or {}
         hd = mo.get("hd")

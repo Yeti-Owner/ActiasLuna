@@ -112,8 +112,7 @@ function apply3d() {
   const on = map3d();
   document.body.classList.toggle("d3", on);
   $("view3d").classList.toggle("hidden", !on);
-  $("dimTog").textContent = show3d ? "2D map" : "3D view";
-  $("dimTog").disabled = boardsOpen();
+  $("dimTog").textContent = on ? "2D map" : "3D view";
   if (on && ensure3d()) {
     v3.setVisible(true);
     if (S) { v3.setRoom(S.layout, SCAN); v3.update(S, colorFor, nodeLabel); }
@@ -624,7 +623,7 @@ $("delVert").onclick = () => {
   renderLayoutPanel(true); drawMap();
 };
 
-// Room scan upload: the server measures the room from the mesh (tools/import_scan.import_room) and resizes the layout
+// Room scan upload: the server reads the room from the labelled scan (tools/import_scan.import_room) and resizes the layout
 // to it. An empty body re-imports the stored scan turned a further 90 degrees.
 async function importScan(file) {
   const msg = $("scanMsg");
@@ -732,7 +731,7 @@ $("labRun").onclick = () => api("/api/lab/run", {});
 async function loadSessions() {
   const list = await (await fetch("/api/sessions")).json();
   $("sessList").innerHTML = list.map((s) => `<div class="sess"><span class="mono">${esc(s.file)} <span class="muted">${(s.bytes / 1024).toFixed(0)} kB</span></span>
-    <button data-rp="${esc(s.file)}">Replay</button><button data-del="${esc(s.file)}">Delete</button></div>`).join("") || "none";
+    <button data-del="${esc(s.file)}">Delete</button></div>`).join("") || "none";
   document.querySelectorAll("#sessList [data-rp]").forEach((b) => (b.onclick = async () => {
     await api("/api/replay/start", { file: b.dataset.rp, speed: +$("rpSpeed").value });
     view = "replay"; connect();
@@ -748,7 +747,12 @@ $("rpPause").onclick = () => S && S.replay && api("/api/replay/control", { pause
 $("rpSpeed").onchange = () => api("/api/replay/control", { speed: +$("rpSpeed").value });
 $("rpStop").onclick = async () => { await api("/api/replay/stop", {}); view = "live"; connect(); };
 $("viewTog").onclick = () => { view = view === "live" ? "replay" : "live"; connect(); };
-$("dimTog").onclick = () => { show3d = !show3d; remember("luna3d", show3d ? "1" : "0"); apply3d(); };
+$("dimTog").onclick = () => {
+  show3d = !map3d();
+  remember("luna3d", show3d ? "1" : "0");
+  if (show3d) $("stBoards").open = false;   // the Boards step auto-opens while boards are unplaced and would hide 3D
+  apply3d();
+};
 $("v3home").onclick = () => v3 && v3.resetView();
 $("v3top").onclick = () => v3 && v3.topView();
 $("modeTog").onclick = () => { simple = !simple; remember("lunaMode", simple ? "simple" : "debug"); applyMode(); };
