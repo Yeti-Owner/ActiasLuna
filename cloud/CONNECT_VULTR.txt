@@ -9,6 +9,16 @@ BEFORE YOU START
   - The Vultr account must be approved (it was "pending review" on 2026-11-14).
   - Do this on Nick's laptop (it has the SSH key and the agent folder).
 
+IF CLAUDE (the coding assistant) IS DOING IT FOR YOU
+  - You do ONLY step 1 below (create the server on Vultr's website, ~3 min).
+  - Then send Claude JUST THE SERVER'S IP ADDRESS (e.g. 45.77.12.34). That's all it needs.
+  - DO NOT send: the root password (not needed - the SSH key logs in), any tokens, or any
+    API keys. The server makes its own tokens, and Claude writes them straight into the
+    config files without showing them in chat.
+  - Claude then does steps 2-6: installs the API over SSH, saves the tokens into
+    config\cloud.json and the agent's .env.local, restarts everything, and tests it.
+    You finish with one FaceTime call to confirm.
+
 ----------------------------------------------------------------
 1) CREATE THE SERVER  (my.vultr.com)
 ----------------------------------------------------------------
@@ -18,6 +28,11 @@ BEFORE YOU START
     ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ0JJX/+wpmmwjZ3Z4aqSJSF9d4lhXn1a8KAuatm3MjZ moth-vultr
   Hostname: moth-cloud      Paid add-ons: OFF      ->  Deploy Now
   Copy the server's IP address when it says "Running".
+
+  GOTCHA: Vultr only attaches SSH keys WHEN THE SERVER IS CREATED. If you forgot to check
+  the moth-vultr key, don't fight it - destroy the server and deploy a new one with the key
+  checked (2 minutes, costs nothing extra). Without the key, step 2 would need the root
+  password typed by hand.
 
 ----------------------------------------------------------------
 2) INSTALL THE HISTORY API ON IT  (PowerShell, in the repo folder)
