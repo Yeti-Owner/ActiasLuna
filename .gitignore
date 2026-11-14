@@ -1,4 +1,4 @@
-# Docs: keep only READMEs
+22# Docs: keep only READMEs
 *.md
 !README.md
 
@@ -53,3 +53,4 @@ venv/
 .DS_Store
 Thumbs.db
 desktop.ini
+node_modules

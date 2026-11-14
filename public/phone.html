@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Moth · Phone Calibration</title>
+  <style>
+    :root {
+      --forest: #2E6F40;
+      --forest-deep: #214F2E;
+      --forest-ink: #12301D;
+      --forest-glow: #8FD3A5;
+      --on-forest: #FFFFFF;
+      --on-forest-muted: rgba(255, 255, 255, 0.78);
+      --on-forest-faint: rgba(255, 255, 255, 0.20);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      background-color: var(--forest);
+      color: var(--on-forest);
+      font-family: 'Geist Sans', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+    header {
+      background-color: var(--forest-deep);
+      border-bottom: 1px solid var(--on-forest-faint);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo-mark {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 18px;
+    }
+    .pin-badge {
+      font-family: monospace;
+      font-size: 12px;
+      background: rgba(255,255,255,0.1);
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--on-forest-faint);
+      cursor: pointer;
+    }
+    main {
+      flex: 1;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-width: 500px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .card {
+      background: var(--forest-deep);
+      border: 1px solid var(--on-forest-faint);
+      border-radius: 16px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    h2 { font-size: 18px; font-weight: 700; }
+    p, span { color: var(--on-forest-muted); font-size: 14px; line-height: 1.4; }
+    .mono { font-family: 'Geist Mono', ui-monospace, monospace; }
+    
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px 20px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s ease;
+      touch-action: manipulation;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary {
+      background: var(--on-forest);
+      color: var(--forest-ink);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    .btn-secondary {
+      background: rgba(255,255,255,0.12);
+      color: var(--on-forest);
+      border: 1px solid var(--on-forest-faint);
+    }
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.25);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+    .btn-big {
+      font-size: 20px;
+      padding: 20px;
+      border-radius: 16px;
+    }
+
+    /* Modal / PIN Dialog */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(18, 48, 29, 0.85);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 200;
+    }
+    .pin-box {
+      background: var(--forest-deep);
+      border: 1px solid var(--on-forest-faint);
+      border-radius: 20px;
+      padding: 24px;
+      width: 100%;
+      max-width: 320px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .pin-input {
+      font-family: monospace;
+      font-size: 32px;
+      letter-spacing: 8px;
+      text-align: center;
+      background: rgba(0,0,0,0.3);
+      border: 2px solid var(--forest-glow);
+      border-radius: 12px;
+      color: white;
+      padding: 8px;
+      width: 100%;
+      outline: none;
+    }
+
+    /* Map Display */
+    .map-container {
+      width: 100%;
+      aspect-ratio: 1;
+      background: var(--forest-ink);
+      border-radius: 12px;
+      border: 1px solid var(--on-forest-faint);
+      position: relative;
+      overflow: hidden;
+    }
+    svg.room-svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Status Bar */
+    .motion-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: monospace;
+      font-size: 12px;
+      background: rgba(0,0,0,0.25);
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--on-forest-faint);
+    }
+    .sensor-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .sensor-active { background: var(--forest-glow); }
+    .sensor-inactive { background: #f87171; }
+
+    /* Notice Toast */
+    .notice {
+      background: var(--forest-ink);
+      border: 1px solid var(--forest-glow);
+      color: var(--forest-glow);
+      font-size: 13px;
+      padding: 10px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    /* Hidden helper */
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <!-- PIN Prompt Overlay -->
+  <div id="pinOverlay" class="overlay hidden">
+    <div class="pin-box">
+      <h2>Enter 4-Digit PIN</h2>
+      <p>Enter the security PIN displayed on the laptop dashboard.</p>
+      <input type="text" id="pinInput" class="pin-input" maxlength="4" pattern="[0-9]*" inputmode="numeric" placeholder="••••" />
+      <button id="pinSubmitBtn" class="btn btn-primary">Connect</button>
+      <span id="pinError" class="mono text-xs" style="color: #f87171;"></span>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="logo-mark">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 4C11.5 2 8 2 5 4C2 6 2 10 4 13C6 16 10 17 12 15C14 17 18 16 20 13C22 10 22 6 19 4C16 2 12.5 2 12 4ZM12 8C11 8 10 10 10 12C10 14 11 15 12 15C13 15 14 14 14 12C14 10 13 8 12 8Z" />
+      </svg>
+      <span>Moth Walk</span>
+    </div>
+    <div id="pinBadge" class="pin-badge">PIN: <span id="pinDisplay">----</span></div>
+  </header>
+
+  <!-- Main Body -->
+  <main>
+    <!-- Motion Sensors Status & Button -->
+    <div class="motion-bar">
+      <div>
+        <span id="sensorDot" class="sensor-indicator sensor-inactive"></span>
+        <span id="motionStatus">Motion Off</span>
+      </div>
+      <div>
+        Steps: <strong id="stepCount" class="mono">0</strong> · <span id="headingDisplay">--°</span>
+      </div>
+    </div>
+    <button id="enableMotionBtn" class="btn btn-secondary">⚡ Turn on Motion Sensors</button>
+
+    <!-- Feedback Notice -->
+    <div id="noticeBox" class="notice hidden"></div>
+
+    <!-- Active Mode Container (Walk / Check / Stand / Idle) -->
+    <div id="walkCard" class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 id="modeTitle">Calibration Route</h2>
+        <span id="walkBadge" class="mono" style="font-size: 12px; color: var(--forest-glow);">Walks: 0</span>
+      </div>
+
+      <!-- Map SVG -->
+      <div class="map-container">
+        <svg id="phoneMapSvg" class="room-svg" viewBox="0 0 8 6"></svg>
+      </div>
+
+      <!-- Instructions & Action Buttons -->
+      <div id="instructionText" style="text-align: center; font-size: 15px; font-weight: 600; color: white;">
+        Tap dot #1 on map to begin walk
+      </div>
+
+      <!-- Primary Action Buttons (Usable one-handed) -->
+      <div id="walkControls" style="display: flex; flex-direction: column; gap: 10px;">
+        <button id="nextDotBtn" class="btn btn-primary btn-big hidden">I'm on dot 1</button>
+        <div style="display: flex; gap: 10px;">
+          <button id="skipDotBtn" class="btn btn-secondary hidden" style="flex: 1;">Skip (Detour)</button>
+          <button id="saveWalkBtn" class="btn btn-secondary hidden" style="flex: 1;">Stop & Save</button>
+          <button id="cancelWalkBtn" class="btn btn-danger hidden" style="flex: 1;">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Accuracy Checks & More Options -->
+    <div class="card">
+      <h2>Check Accuracy & More</h2>
+      <div style="display: flex; gap: 8px;">
+        <button id="checkSpotBtn" class="btn btn-secondary" style="flex: 1;">Check here (8s)</button>
+        <button id="recordSpotBtn" class="btn btn-secondary" style="flex: 1;">Record Spot (12s)</button>
+      </div>
+      
+      <!-- Orientation selector -->
+      <div style="margin-top: 8px;">
+        <span style="font-size: 12px; display: block; margin-bottom: 4px;">Phone orientation:</span>
+        <select id="orientationSelect" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--on-forest-faint); color: white; border-radius: 8px; font-family: sans-serif;">
+          <option value="hand">In hand (default)</option>
+          <option value="front_pocket">Front pocket</option>
+          <option value="back_pocket">Back pocket</option>
+          <option value="bag">In bag</option>
+        </select>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 4px;">
+        <button id="emptyRoomBtn" class="btn btn-secondary" style="flex: 1; font-size: 13px;">Record Empty Room</button>
+        <button id="clearCalibBtn" class="btn btn-danger" style="font-size: 13px;">Start Over</button>
+      </div>
+    </div>
+  </main>
+
+  <script src="/phone.js"></script>
+</body>
+</html>
+
