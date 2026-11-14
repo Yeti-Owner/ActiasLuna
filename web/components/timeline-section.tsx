@@ -1,6 +1,7 @@
 import GardenInsect from "@/components/ui/garden-insect"
 import ScrollTimeline, { Milestone } from "@/components/ui/scroll-timeline"
 import LiveRoomPanel from "@/components/live-room-panel"
+import PhoneMockupBasic from "@/components/ui/phone-mockups-1"
 
 const MOTH_MILESTONES: Milestone[] = [
   {
@@ -13,24 +14,7 @@ const MOTH_MILESTONES: Milestone[] = [
   },
   {
     id: "3",
-    date: "STEP 03",
-    title: "Track",
-    description:
-      "A Bayesian filter combines those readings over time with motion to pin down a position far more precisely than any single reading could.",
-  },
-  {
-    id: "4",
-    date: "STEP 04",
-    title: "Show",
-    description:
-      "A live dashboard draws everyone on a floor plan or a LiDAR-scanned 3D model of the room.",
-  },
-  {
-    id: "5",
-    date: "BY DESIGN",
-    title: "Private by default",
-    description:
-      "Content is never read, strangers are filtered out in hardware, the network is air-gapped, and only phones that deliberately join are tracked.",
+    content: <PhoneMockupBasic />,
   },
 ]
 

@@ -1,6 +1,72 @@
 @import "tailwindcss";
 @import "./fonts.css";
 
+.call-walkthrough { padding: 0 0 8px; text-align: center; }
+.call-section-heading > span { color: #d7e9b5; font: 11px "Geist Sans", sans-serif; letter-spacing: .2em; text-transform: uppercase; }
+.call-section-heading h3 { margin: 12px 0 8px; font-size: clamp(26px, 3.5vw, 38px); line-height: 1.2; letter-spacing: -.04em; }
+.call-section-heading > p { margin: 0; color: #d6e0ce99; font-size: 12px; }
+.phone-carousel { margin-top: 32px; }
+.phone-carousel-stage { position: relative; height: 510px; overflow: hidden; isolation: isolate; mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent); }
+.call-phone-position { position: absolute; top: 4px; left: calc(50% - 122px); width: 244px; height: 496px; transform-origin: center center; }
+.call-phone-frame { height: 100%; padding: 7px; border: 1px solid #8e9688; border-radius: 41px; background: linear-gradient(130deg, #7a8176, #111511 14%, #383d35 50%, #131812 85%, #717969); box-shadow: 0 24px 50px #00180955, 0 0 0 1px #0e150d; }
+.call-screen { position: relative; display: flex; flex-direction: column; align-items: center; height: 100%; padding: 0 17px 25px; overflow: hidden; border-radius: 34px; background: radial-gradient(ellipse at 50% 14%, #596f50 0, #2d4437 38%, #142a23 80%); color: #f4f5e9; font-family: "Geist Sans", sans-serif; text-shadow: none; }
+.call-status { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 42px; flex: 0 0 42px; font-size: 10px; font-weight: 600; }
+.call-status > span:last-child { display: flex; align-items: center; gap: 3px; }
+.call-island { position: absolute; top: 10px; left: calc(50% - 35px); width: 70px; height: 19px; border-radius: 20px; background: #080d09; }
+.call-provider { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 10px; color: #e5eddfb3; margin: 6px 0 16px; }
+.call-provider img { width: 17px; height: 17px; object-fit: contain; }
+.call-provider > span { color: #e5eddf66; }
+.call-avatar { display: grid; place-items: center; width: 65px; height: 65px; flex: 0 0 65px; border: 1px solid #e1efbc33; background: #d6edb00d; border-radius: 50%; box-shadow: 0 0 28px #cae5a40c; }
+.call-avatar svg { width: 49px; height: 49px; }
+.call-avatar.is-ringing { animation: call-ring 3s ease-out infinite; }
+.call-screen h4 { margin: 12px 0 4px; font-size: 21px; font-weight: 500; letter-spacing: -.6px; }
+.call-connection { margin: 0; font-size: 10px; color: #d5e2ce99; display: flex; align-items: center; gap: 5px; }
+.call-connection > span { width: 4px; height: 4px; border-radius: 50%; background: #b7dfa1; }
+.call-conversation { width: 100%; flex: 1; padding-top: 26px; }
+.call-transcript-label { display: flex; align-items: center; gap: 5px; color: #d4dfc987; font-size: 9px; margin-bottom: 9px; }
+.call-transcript { border: 1px solid #e3efd51f; border-radius: 13px 13px 13px 3px; padding: 12px; background: #ebf3df0c; }
+.call-transcript > span { display: block; color: #c5daa7; font-size: 9px; font-weight: 500; margin-bottom: 6px; }
+.call-transcript > p { margin: 0; font-size: 14px; line-height: 1.5; letter-spacing: -.2px; }
+.call-transcript.from-caller { border-radius: 13px 13px 3px 13px; background: #d9e8c9; color: #213b2c; }
+.call-transcript.from-caller > span { color: #536e48; }
+.call-actions { display: flex; justify-content: space-around; align-items: center; width: 100%; margin-top: 12px; }
+.call-actions > div { position: relative; display: grid; place-items: center; width: 39px; height: 39px; border-radius: 50%; background: #eef4e515; }
+.call-actions small { position: absolute; top: 45px; font-size: 8px; color: #dce5d5a6; }
+.call-actions > .call-hangup { width: 44px; height: 44px; background: #bd5148; box-shadow: 0 4px 12px #07190e33; }
+.call-home-indicator { position: absolute; bottom: 7px; left: calc(50% - 38px); height: 3px; width: 76px; background: #e9f0e0b3; border-radius: 5px; }
+.call-dialing { text-align: center; color: #d2e3bb; padding-top: 8px; }
+.call-dialing > svg { margin: 0 auto; opacity: .7; }
+.call-dialing p { font-size: 12px; line-height: 1.7; margin-top: 18px; color: #d9e4ce99; }
+.call-wave { height: 25px; display: flex; gap: 4px; align-items: center; justify-content: center; margin-top: 15px; }
+.call-wave i { width: 3px; height: 8px; border-radius: 4px; background: #c9dda8; animation: call-wave 1.5s ease-in-out infinite; }
+.call-listening { display: flex; gap: 3px; align-items: center; margin: 15px 0 0 4px; font-size: 9px; color: #d4dfc987; }
+.call-listening span { width: 3px; height: 3px; border-radius: 50%; background: #c5daa7; }
+.call-listening span:last-of-type { margin-right: 4px; }
+.call-room-summary { margin-top: 10px; padding: 10px; border: 1px solid #c5daa728; border-radius: 10px; background: #061d1630; }
+.call-room-summary > span { display: flex; align-items: center; gap: 4px; font-size: 8px; color: #bcd39e; }
+.call-room-summary > div { display: flex; align-items: center; gap: 5px; font-size: 9px; margin-top: 8px; }
+.call-room-summary i { width: 4px; height: 4px; border-radius: 50%; background: #c5daa7; }
+.call-room-summary strong { margin-left: auto; font-weight: 500; }
+.call-room-summary > p { margin: 7px 0 0; color: #c9d8bf80; font-size: 8px; }
+.call-screen-3 .call-conversation { padding-top: 15px; }
+.call-screen-3 .call-transcript { padding: 10px; }
+.call-screen-3 .call-transcript > p { font-size: 13px; }
+.call-carousel-caption { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 15px; font-size: 15px; }
+.call-stage-number { color: #c9d9ba80; font: 10px "Geist Sans", sans-serif; letter-spacing: .05em; }
+.call-carousel-controls { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 16px; }
+.call-carousel-controls > button { width: 36px; height: 36px; border-radius: 50%; border: 1px solid #d5e5bd33; background: #1530224d; display: grid; place-items: center; color: #e1edce; cursor: pointer; transition: background .2s; }
+.call-carousel-controls > button:hover { background: #c5daa726; }
+.call-carousel-controls button:focus-visible { outline: 2px solid #e1edce; outline-offset: 4px; }
+.call-carousel-controls button:disabled { opacity: .4; cursor: default; }
+.call-carousel-dots { display: flex; }
+.call-carousel-dots button { width: 23px; height: 36px; display: grid; place-items: center; cursor: pointer; }
+.call-carousel-dots span { width: 5px; height: 5px; background: #c5daa74d; border-radius: 5px; transition: width .3s, background .3s; }
+.call-carousel-dots .is-active { width: 16px; background: #d4e6b9; }
+@keyframes call-ring { 0% { box-shadow: 0 0 0 0 #d6edb025; } 100% { box-shadow: 0 0 0 18px #d6edb000; } }
+@keyframes call-wave { 50% { height: 22px; opacity: .5; } }
+@media (max-width: 520px) { .phone-carousel-stage { mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent); } .call-section-heading h3 { font-size: 26px; } }
+@media (prefers-reduced-motion: reduce) { .call-avatar.is-ringing, .call-wave i { animation: none; } .call-carousel-dots span { transition: none; } }
+
 .site-background {
   position: fixed;
   inset: 0;
