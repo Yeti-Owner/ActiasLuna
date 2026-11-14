@@ -22,6 +22,9 @@ const colors = {};
 const shown = {};
 
 try { simple = localStorage.lunaMode !== "debug"; show3d = localStorage.luna3d === "1"; } catch (e) {}
+// A presentation embedded in the green frontend starts in 3D without changing saved preferences.
+const embedded = new URLSearchParams(window.location.search).get("embed") === "1";
+if (embedded) { simple = true; show3d = true; document.body.classList.add("embedded"); }
 const remember = (k, v) => { try { localStorage[k] = v; } catch (e) {} };
 
 function colorFor(mac) {

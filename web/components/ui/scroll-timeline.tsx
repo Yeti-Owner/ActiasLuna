@@ -5,9 +5,10 @@ import mothImg from "@/public/moth-luna/moth.png";
 
 export interface Milestone {
   id: string;
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
   date?: string;
+  content?: React.ReactNode;
 }
 
 export interface TimelineProps {
@@ -34,14 +35,15 @@ export default function Component({ milestones }: TimelineProps) {
     let lastScroll = window.scrollY;
     let directionTravel = 0;
     let active = -1;
+    let waypoints: number[] = [];
     let disposed = false;
 
     const paint = () => {
       marker.style.transform = "translate3d(-50%," + (position * height).toFixed(3) + "px,0)";
       heading.style.transform = "rotate(" + angle.toFixed(3) + "deg)";
       trail.style.transform = "scaleY(" + position.toFixed(6) + ")";
-      const next = milestones.reduce((reached, _, index) =>
-        position >= index / (milestones.length - 1 || 1) - .05 ? index : reached, -1);
+      const next = waypoints.reduce((reached, point, index) =>
+        position >= point - .025 ? index : reached, -1);
       if (next !== active) { active = next; setActiveIndex(next); }
     };
 
@@ -80,6 +82,8 @@ export default function Component({ milestones }: TimelineProps) {
     const update = () => {
       const rect = track.getBoundingClientRect();
       height = rect.height;
+      waypoints = Array.from(track.querySelectorAll<HTMLElement>("[data-timeline-waypoint]")).map(el =>
+        (el.getBoundingClientRect().top - rect.top) / Math.max(1, height));
       target = Math.max(0, Math.min(1, (window.innerHeight * .5 - rect.top) / Math.max(1, height)));
       const dy = window.scrollY - lastScroll;
       lastScroll = window.scrollY;
@@ -153,14 +157,14 @@ export default function Component({ milestones }: TimelineProps) {
               : "border-white/30 bg-white/20 scale-100";
 
             return (
-              <div key={milestone.id} className="relative w-full pl-10 md:pl-16">
+              <div key={milestone.id} data-timeline-waypoint className="relative w-full pl-10 md:pl-16">
                 {/* The milestone waypoint dot, centered on the left line */}
                 <div
                   className={`absolute left-0 top-0 z-20 mt-1.5 h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 transition-all duration-500 ${dotClasses}`}
                 />
 
                 {/* Content, always to the right of the line */}
-                <div
+                {(milestone.date || milestone.title || milestone.description) && <div
                   className={`max-w-2xl text-left transition-all duration-700 ease-out ${
                     isActive ? "translate-y-0 opacity-100" : "translate-y-8 opacity-30"
                   }`}
@@ -170,13 +174,14 @@ export default function Component({ milestones }: TimelineProps) {
                       {milestone.date}
                     </div>
                   )}
-                  <h3 className="text-2xl font-bold tracking-tight text-white">
+                  {milestone.title && <h3 className="text-2xl font-bold tracking-tight text-white">
                     {milestone.title}
-                  </h3>
-                  <p className="mt-3 text-base leading-relaxed text-white/80">
+                  </h3>}
+                  {milestone.description && <p className="mt-3 text-base leading-relaxed text-white/80">
                     {milestone.description}
-                  </p>
-                </div>
+                  </p>}
+                </div>}
+                {milestone.content && <div className={milestone.date || milestone.title || milestone.description ? "mt-8" : undefined}>{milestone.content}</div>}
               </div>
             );
           })}

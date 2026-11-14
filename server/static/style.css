@@ -137,3 +137,17 @@ body.d3 #map { display: none; }
   main, body.simple main { grid-template-columns: 1fr; height: auto; }
   #center { order: -1; height: 65vh; }
 }
+
+/* Inline presentation shows only the interactive 3D canvas. */
+body.embedded { margin: 0; overflow: hidden; background: #09170f; }
+body.embedded header,
+body.embedded.simple #left,
+body.embedded.simple #right,
+body.embedded.simple #simple,
+body.embedded #legend,
+body.embedded #replayBar,
+body.embedded .v3bar { display: none !important; }
+body.embedded.simple main { display: flex; width: 100%; height: 100vh; }
+body.embedded.simple #center { flex: 1; order: 0; min-width: 0; height: 100%; padding: 0; overflow: hidden; }
+body.embedded #view3d,
+body.embedded #view3d canvas { min-height: 0; border-radius: 0; }

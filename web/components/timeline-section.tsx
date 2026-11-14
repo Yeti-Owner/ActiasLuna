@@ -1,5 +1,6 @@
 import GardenInsect from "@/components/ui/garden-insect"
 import ScrollTimeline, { Milestone } from "@/components/ui/scroll-timeline"
+import LiveRoomPanel from "@/components/live-room-panel"
 
 const MOTH_MILESTONES: Milestone[] = [
   {
@@ -10,10 +11,7 @@ const MOTH_MILESTONES: Milestone[] = [
   },
   {
     id: "2",
-    date: "STEP 02",
-    title: "Map",
-    description:
-      "A short calibration walk teaches Actias Luna how signal strength changes across your room: walls, furniture and all.",
+    content: <LiveRoomPanel />,
   },
   {
     id: "3",
@@ -40,7 +38,7 @@ const MOTH_MILESTONES: Milestone[] = [
 
 export default function TimelineSection() {
   return (
-    <section className="relative w-full max-w-5xl mx-auto pt-16 pb-20">
+    <section className="relative w-full max-w-7xl mx-auto pt-16 pb-20">
       <GardenInsect species="dragonfly" className="insect-timeline" />
 
       <div className="px-6 md:px-16 mb-8 text-left">
