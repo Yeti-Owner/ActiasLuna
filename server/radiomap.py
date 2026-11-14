@@ -19,14 +19,14 @@ T_PRIOR_SD = 8.0
 D0 = 0.3
 # DELTA_SD: prior sd (dB) of an unknown phone's offset (model, pocket). DELTA_FIT_SD: one calibration group versus the
 # others (same phone, so small). Live readings are compared only after solving that offset per cell.
-DELTA_SD = 12.0
-DELTA_FIT_SD = 4.0
+DELTA_SD = 10.0
+DELTA_FIT_SD = 2.0
 # GP residual: GP_SF is the prior sd (dB) of what log-distance misses (walls, furniture), GP_LEN its length scale.
 # Spot noise: a standing spot sits inside one multipath fade (SN_STILL); a walked window averages several (SN_MOVE).
 GP_SF = 3.0
 GP_LEN = 1.2
 SN_STILL = 3.0
-SN_MOVE = 2.0
+SN_MOVE = 3.0
 LOCAL_VAR = 1.0
 SIGMA_UNCAL = 6.0
 # SIGMA_OBS: fading sd (dB) of one live reading on top of the map's own uncertainty. FRAME_VAR / frames adds the
@@ -39,12 +39,15 @@ MIN_FRAMES = 3
 # "shadow_guard": readings weaker than the offset-corrected prediction switch from quadratic to linear cost at SHADOW_K
 # sd (instead of ROBUST_K), so one blocked board can't drag the fix away. Stronger-than-predicted readings keep
 # ROBUST_K because bodies only attenuate. The offset is then re-solved once with those low readings down-weighted.
-SHADOW_K = 1.5
+SHADOW_K = 1.0
 SHADOW_W = 0.35
 # "holder_body": the person holding the phone shadows boards behind them. Expected loss for a board at angle phi from
 # the facing direction is HOLDER_DB * max(0, -cos(phi)). Spots record their facing so the map is fitted body-free;
 # live, facing comes from the compass or, without it, the direction-averaged loss HOLDER_DB / pi is assumed.
-HOLDER_DB = 3.0
+HOLDER_DB = 7.0
+# A board straight ahead is also slightly louder than one to the side (the phone is in front of the body, nothing in
+# the way): HOLDER_FRONT_DB * max(0, cos(phi)) is subtracted from the loss.
+HOLDER_FRONT_DB = 1.5
 
 Live = Dict[str, Tuple[float, int]]
 Blocked = List[Tuple[List[List[float]], float]]
@@ -283,6 +286,11 @@ def per_node(samples, min_n: int = 1) -> Dict[str, dict]:
     return out
 
 
+def _body_loss(cos_phi):
+    """dB the holder's body takes off a board at angle phi from where they face (see HOLDER_DB)."""
+    return HOLDER_DB * np.maximum(0.0, -cos_phi) - HOLDER_FRONT_DB * np.maximum(0.0, cos_phi)
+
+
 def _sq_exp(ax, ay, bx, by) -> np.ndarray:
     d2 = (ax[:, None] - bx[None, :]) ** 2 + (ay[:, None] - by[None, :]) ** 2
     return GP_SF ** 2 * np.exp(-d2 / (2 * GP_LEN ** 2))
@@ -325,9 +333,9 @@ class RadioMap:
         if not self.holder:
             return 0.0
         if facing is None:
-            return HOLDER_DB / math.pi
+            return (HOLDER_DB - HOLDER_FRONT_DB) / math.pi
         bx, by = self.rx[n]
-        return HOLDER_DB * max(0.0, -math.cos(math.atan2(by - y, bx - x) - facing))
+        return float(_body_loss(math.cos(math.atan2(by - y, bx - x) - facing)))
 
     def _observations(self):
         out = []
@@ -451,9 +459,9 @@ class RadioMap:
         E = rssi - self.MU[rows] - off
         if self.holder:
             if facing is None:
-                E = E + HOLDER_DB / math.pi
+                E = E + (HOLDER_DB - HOLDER_FRONT_DB) / math.pi
             else:
-                E = E + HOLDER_DB * np.maximum(0.0, -np.cos(self.ANG[rows] - facing))
+                E = E + _body_loss(np.cos(self.ANG[rows] - facing))
         prec = 1.0 / (DELTA_SD if off_sd is None else max(off_sd, 1e-3)) ** 2
         d = (W * E).sum(0) / (W.sum(0) + prec)
         if shadow:

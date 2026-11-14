@@ -20,7 +20,6 @@ from tracker import Tracker
 
 WARMUP_S = 15.0
 SETTLE_S = 3.0
-STILL_S_MIN = 4.0
 
 
 def truths(calib: dict) -> List[dict]:
@@ -77,7 +76,8 @@ def _maps(layout, spots, links, blocked, groups, blocks=(), holder=False):
 
 def _score_truth(job, st, m, truth, lines, out):
     # heading/stride as App.ctx provides them; without them steps + compass silently does nothing.
-    ctx = {"map": m, "settings": st, "heading": job.get("heading") or {}, "stride": job.get("stride")}
+    ctx = {"map": m, "settings": st, "heading": job.get("heading") or {}, "stride": job.get("stride"),
+           "camera": job.get("camera")}
     tk = Tracker(lambda: ctx, [])
     mac = truth["phone"]
     still = truth["kind"] == "still"
@@ -156,9 +156,10 @@ def summarize(res: dict) -> dict:
     }
 
 
-def jobs(base: dict, layout, spots, links, blocked, truth_list, sessions, heading=None, stride=None) -> List[dict]:
+def jobs(base: dict, layout, spots, links, blocked, truth_list, sessions, heading=None, stride=None,
+         camera=None) -> List[dict]:
     common = {"layout": layout, "spots": spots, "links": links, "blocked": blocked, "truths": truth_list,
-              "sessions": sessions, "heading": heading or {}, "stride": stride}
+              "sessions": sessions, "heading": heading or {}, "stride": stride, "camera": camera}
     out = [dict(common, name="your settings", key=None, settings=dict(base))]
     for key in cfg.DEFAULTS:
         if key in cfg.LAB_SKIP:

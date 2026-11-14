@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Laptop camera</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+body { min-height: 100vh; }
+.wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 18px; margin: 4px 0 2px; }
+.steps { color: var(--muted); margin: 0 0 12px; }
+.steps b { color: var(--fg); }
+#plan { width: 100%; background: var(--canvas); border: 1px solid var(--line); border-radius: 8px; cursor: crosshair; touch-action: none; display: block; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
+select, button { font: inherit; color: var(--fg); background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; }
+button.primary { background: var(--acc); color: var(--acc-ink); border-color: var(--acc); font-weight: 600; }
+button:disabled { opacity: .45; cursor: default; }
+#status { padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: var(--stale); }
+.dot.on { background: var(--acc); } .dot.wait { background: var(--warn); } .dot.bad { background: var(--bad); }
+.muted { color: var(--muted); }
+#msg { min-height: 1.4em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Laptop camera</h1>
+  <p class="steps"><b>1.</b> Click where the laptop is. <b>2.</b> Click where its camera looks. <b>3.</b> Save. That's it:
+    the camera starts by itself and fine-tunes its tilt from the people it sees.</p>
+  <canvas id="plan" width="720" height="520"></canvas>
+  <div class="row">
+    <label>Camera height
+      <select id="height">
+        <option value="1.0">Laptop on a desk or table (about 3 ft)</option>
+        <option value="0.7">Laptop on a lap or low table (about 2 ft)</option>
+        <option value="1.5">Up on a shelf or stand (about 5 ft)</option>
+      </select>
+    </label>
+    <button id="save" class="primary" disabled>Save</button>
+    <button id="clear">Remove camera</button>
+    <span id="msg" class="muted"></span>
+  </div>
+  <div id="status">Loading…</div>
+</div>
+<script>
+// Coupled to server/luna_server.py (GET /api/camera, POST /api/camera/place|clear) and camera/pose.py: HFOV_DEG
+// mirrors pose.HFOV_DEG so the drawn view matches the model. Metres in code, feet on screen.
+const HFOV_DEG = 68, FT = 0.3048, PAD = 1.0;
+const $ = (id) => document.getElementById(id);
+const canvas = $("plan"), ctx = canvas.getContext("2d");
+let info = null, cam = null, look = null, view = null;
+
+function fit() {
+  const xs = info.polygon.map((p) => p[0]), ys = info.polygon.map((p) => p[1]);
+  const x0 = Math.min(...xs) - PAD, y0 = Math.min(...ys) - PAD, x1 = Math.max(...xs) + PAD, y1 = Math.max(...ys) + PAD;
+  const w = canvas.clientWidth, h = Math.min(window.innerHeight * 0.62, w * (y1 - y0) / (x1 - x0));
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.height = h + "px"; canvas.width = w * dpr; canvas.height = h * dpr;
+  const s = Math.min(w / (x1 - x0), h / (y1 - y0));
+  view = { s, ox: (w - s * (x1 - x0)) / 2 - s * x0, oy: (h - s * (y1 - y0)) / 2 - s * y0, dpr };
+}
+const toPx = (x, y) => [view.ox + view.s * x, view.oy + view.s * y];
+const toM = (px, py) => [(px - view.ox) / view.s, (py - view.oy) / view.s];
+
+function path(pts) { ctx.beginPath(); pts.forEach((p, i) => ctx[i ? "lineTo" : "moveTo"](...toPx(p[0], p[1]))); ctx.closePath(); }
+
+function draw() {
+  if (!info) return;
+  fit();
+  ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  path(info.polygon); ctx.fillStyle = "#121830"; ctx.fill(); ctx.strokeStyle = "#5b6690"; ctx.lineWidth = 2; ctx.stroke();
+  for (const o of info.objects) { path(o.footprint); ctx.fillStyle = "#1d2440"; ctx.fill(); ctx.strokeStyle = "#39436a"; ctx.lineWidth = 1; ctx.stroke(); }
+  ctx.fillStyle = "#7a819c";
+  for (const r of Object.values(info.receivers)) { const [X, Y] = toPx(r.x, r.y); ctx.fillRect(X - 4, Y - 4, 8, 8); }
+  if (!cam) return;
+  const [cx, cy] = toPx(cam[0], cam[1]);
+  if (look) {
+    const yaw = Math.atan2(look[1] - cam[1], look[0] - cam[0]), half = HFOV_DEG * Math.PI / 360, reach = 12 * view.s;
+    ctx.save(); path(info.polygon); ctx.clip();
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, reach, yaw - half, yaw + half); ctx.closePath();
+    ctx.fillStyle = "rgba(143,220,178,0.16)"; ctx.fill(); ctx.restore();
+    const [lx, ly] = toPx(look[0], look[1]);
+    ctx.strokeStyle = "#8fdcb2"; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(lx, ly); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(lx, ly, 5, 0, 2 * Math.PI); ctx.fillStyle = "#8fdcb2"; ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(cx, cy, 9, 0, 2 * Math.PI); ctx.fillStyle = "#e7eaf6"; ctx.fill();
+  ctx.fillStyle = "#06160e"; ctx.font = "bold 10px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("📷", cx, cy + 1);
+}
+
+canvas.addEventListener("pointerdown", (ev) => {
+  if (!view) return;
+  const r = canvas.getBoundingClientRect(), p = toM(ev.clientX - r.left, ev.clientY - r.top);
+  if (!cam || look) { cam = p; look = null; $("msg").textContent = "Now click where the camera looks."; }
+  else { look = p; $("msg").textContent = "Press Save."; }
+  $("save").disabled = !(cam && look);
+  draw();
+});
+
+async function post(url, body) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+}
+
+$("save").onclick = async () => {
+  try {
+    await post("/api/camera/place", { x: cam[0], y: cam[1], look_x: look[0], look_y: look[1], height: +$("height").value });
+    $("msg").textContent = "Saved ✓"; $("save").disabled = true;
+    await refresh();
+  } catch (e) { $("msg").textContent = e.message; }
+};
+$("clear").onclick = async () => {
+  if (!confirm("Stop using the laptop camera?")) return;
+  try { await post("/api/camera/clear"); cam = look = null; $("msg").textContent = "Removed."; await refresh(); draw(); }
+  catch (e) { $("msg").textContent = e.message; }
+};
+
+function statusHtml() {
+  const s = info.status, line = (cls, text) => `<span class="dot ${cls}"></span>${text}`;
+  if (!info.pose && !info.manual) return line("", "Not placed yet.");
+  if (!s || s.age == null || s.age > 3) return line("wait", info.started ? "Starting the camera… (allow camera access if Windows asks)" : "Waiting for the camera…");
+  const tilt = info.pose ? `<br><span class="muted">Tilt ${info.pose.pitch_deg.toFixed(1)}°, fine-tuned from people seen head to toe ` +
+    `(${info.sightings} so far).</span>` : "";
+  return line("on", `Camera live · sees ${s.seen} ${s.seen === 1 ? "person" : "people"} · helping ${s.used} phone${s.used === 1 ? "" : "s"}`) + tilt;
+}
+
+async function refresh() {
+  info = await (await fetch("/api/camera")).json();
+  if (info.pose && !cam) {
+    cam = [info.pose.x, info.pose.y];
+    look = [info.pose.x + Math.cos(info.pose.yaw), info.pose.y + Math.sin(info.pose.yaw)];
+    const h = String(info.pose.height);
+    if ([...$("height").options].some((o) => o.value === h)) $("height").value = h;
+  }
+  $("status").innerHTML = statusHtml();
+  draw();
+}
+$("height").onchange = () => { $("save").disabled = !(cam && look); };
+window.addEventListener("resize", draw);
+refresh();
+setInterval(() => refresh().catch(() => { $("status").innerHTML = '<span class="dot bad"></span>Server not reachable.'; }), 2000);
+</script>
+</body>
+</html>

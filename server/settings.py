@@ -13,7 +13,7 @@ DEFAULTS = {
     "smoothing": True,
     "csi_motion": False,
     "robust_rssi": True,
-    "pdr": True,
+    "pdr": False,
     "fuse_body": False,
     "holder_body": True,
     "device_free": False,

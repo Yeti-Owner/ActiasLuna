@@ -13,8 +13,9 @@ leave-one-out), "eval_s" (window length), "still" (False = averaged while moving
 the walker faced so radiomap can undo their body's shadow); see radiomap._fit / _noise / evaluate. Bump VERSION
 whenever the spots produced from the same capture change: luna_server rebuilds stored spots from the raw walks.
 
-Guided walks are the secondary method; "I'm here" marks (luna_server.App._finish_mark) are the primary one. Between
-two marks the person walks freely, so those legs only feed the compass offset and stride (leg_fit, motion_fit).
+Guided walks are the secondary method; "I'm here" marks (luna_server.App._finish_mark) are the primary one. The walk
+between two marks (a leg) is treated as a two-tap walk: leg_spots turns its readings into map spots the same way, and
+leg_fit / motion_fit learn the compass offset and stride from it.
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ from typing import List, Optional
 import radiomap as rmap
 import sensing
 
-VERSION = 2
+VERSION = 3
 STEP_S = 0.25
 WALK_WIN_S = 1.0
 MIN_DWELL_S = 1.0
@@ -248,11 +249,6 @@ def _stride(legs: List[tuple]) -> Optional[float]:
     return min(STRIDE_MAX_M, max(STRIDE_MIN_M, sum(d for d, _ in plausible) / steps))
 
 
-def stride_fit(capture: dict):
-    """Metres per counted step over legs where the step counter ran (detectors and strides vary per person/phone)."""
-    return _stride(_stride_legs(capture))
-
-
 def leg_fit(leg: dict) -> Optional[dict]:
     """What one walk between two "I'm here" marks teaches: compass offset and steps, or None.
 
@@ -276,6 +272,21 @@ def leg_fit(leg: dict) -> Optional[dict]:
         return None
     return {"phone": leg["phone"], "offset": math.atan2(dy, dx) - math.atan2(s, c), "agree": agree, "dist": dist,
             "steps": rows[-1][1] - rows[0][1]}
+
+
+def leg_id(leg: dict) -> str:
+    return f"leg:{leg['phone']}:{int(leg['t0'] * 1000)}"
+
+
+def leg_spots(leg: dict) -> List[dict]:
+    """Map spots from one leg: start mark at 0, end mark at t1 (when the end was tapped). Each leg gets its own group,
+    so its phone offset is fitted on its own (radiomap._fit). Legs stored before readings were kept give nothing."""
+    if not leg.get("samples") or not leg.get("t1"):
+        return []
+    capture = {"phone": leg["phone"], "orientation": leg.get("orientation", "hand"), "t0": leg["t0"],
+               "marks": [[0.0, leg["x0"], leg["y0"]], [leg["t1"], leg["x1"], leg["y1"]]],
+               "motion": leg.get("motion") or [], "samples": leg["samples"]}
+    return walk_spots(capture, leg_id(leg))
 
 
 def motion_fit(walks: List[dict], legs: List[dict]):

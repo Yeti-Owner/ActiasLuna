@@ -52,7 +52,9 @@ def apply(tr: Tracker, line: dict):
     and {"rt", "src", "p": packet}.
     """
     if "meta" in line:
-        tr.laptop_ip = (line["meta"] or {}).get("laptop_ip")
+        meta = line["meta"] or {}
+        tr.laptop_ip = meta.get("laptop_ip")
+        tr.laptop_macs.update(str(m).lower() for m in meta.get("laptop_macs") or [])
     elif "motion" in line:
         mo = line["motion"] or {}
         hd = mo.get("hd")
@@ -93,12 +95,11 @@ class Replay:
     act at once. Lines before `start` seconds are fed without delay (seek); long recording gaps are capped at MAX_GAP_S.
     """
 
-    def __init__(self, fname: str, header: dict, lines: list, lock, get_ctx, boards, speed: float, start: float,
-                 hidden=()):
+    def __init__(self, fname: str, header: dict, lines: list, lock, get_ctx, boards, speed: float, start: float):
         self.file = fname
         self.pkts = lines
         self.lock = lock
-        self.tracker = Tracker(get_ctx, boards, hidden)
+        self.tracker = Tracker(get_ctx, boards)
         self.speed = max(0.01, speed)
         self.t0, self.t1 = lines[0]["rt"], lines[-1]["rt"]
         self.pos = self.t0

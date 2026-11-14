@@ -1,5 +1,5 @@
 {
- "kind": "mesh",
+ "kind": "roomplan",
  "polygon": [[0, 0], [6.0, 0], [6.0, 4.5], [0, 4.5]],
  "ceiling_m": 2.6,
  "objects": [

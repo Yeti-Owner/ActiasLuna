@@ -32,7 +32,6 @@ class Room:
     def size(self):
         return (self.w, self.d, self.h)
 
-    # ---- loading -------------------------------------------------------------------------------------------------
     @classmethod
     def load(cls, path):
         with open(path, encoding="utf-8") as f:
@@ -106,7 +105,6 @@ class Room:
         """A plain empty room, the fallback when there's no scan."""
         return cls(w, d, h)
 
-    # ---- geometry ------------------------------------------------------------------------------------------------
     def on_furniture(self, x, y, pad=FURNITURE_PAD):
         """True if (x, y) is over a furniture footprint, grown by `pad` metres. pad=0 is the real footprint."""
         for o in self.objects:
