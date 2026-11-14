@@ -20,7 +20,17 @@ Fill in `.env.local`, which is never committed. Never paste these values into ch
 - `OPENAI_API_KEY`
 - `MOTH_API_URL` and `MOTH_QUERY_TOKEN`: from `cloud/deploy.sh`'s output. Use the **QUERY** token, which can only read.
 
-## Run (two terminals)
+## Brain: Gemini or OpenAI
+If `GOOGLE_API_KEY` is set (free at aistudio.google.com/apikey), the agent uses Gemini's live voice model; otherwise it uses OpenAI. `chert doctor` always warns "No OPENAI_API_KEY" because its check only knows the OpenAI starter. With Gemini, that warning is expected.
+
+**Also edit `chert-rooms.mjs`** (Chert's starter file): pass `port: 8091` to `new ServerOptions({...})`. The agent's health server defaults to **8081**, which collides with Moth's phone calibration page.
+
+**Windows clock:** Chert declines calls when the PC clock is more than ¼ s fast. If `chert doctor` flags the clock, run in an **Administrator** PowerShell: `w32tm /config /manualpeerlist:"time.windows.com,0x9" /syncfromflags:manual /update`, `Restart-Service w32time`, then wait a few seconds and run `w32tm /resync /force`.
+
+## Run (three terminals)
+```powershell
+py tools/demo_run.py --sim --cloud      # in the repo: dashboard + room history (use --button instead of --sim for real boards)
+```
 ```powershell
 npm start                                                            # terminal 1: the agent
 npx @trychert/facetime@0.1.0-beta.21 dev --agent moth-room-nick      # terminal 2: puts it on your Chert line
