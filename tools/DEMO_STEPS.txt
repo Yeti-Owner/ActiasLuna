@@ -67,3 +67,45 @@ ONE-TIME SETUP (do this now, while you still have internet):
 
   The dashboard is always at:   http://127.0.0.1:8080/
 ================================================================
+
+================================================================
+  REAL BOARDS DON'T SHOW UP  (button works, map empty)
+================================================================
+The button works over USB and the dashboard is localhost, so those can work even
+when the boards can't reach the laptop. The boards only appear when the laptop is
+truly ON the demo subnet. Check these IN ORDER:
+
+  1) JOIN the network, then prove you got a demo address:
+       - Join DEMO-DONT JOIN in Windows Wi-Fi (the password is whatever Callum
+         flashed into the boards - ask him if "DEMO-DONT JOIN" won't accept it).
+       - Open a terminal and run:   ipconfig
+       - The Wi-Fi adapter MUST show   IPv4 Address . . . 192.168.4.x
+         * 192.168.4.x  -> good, go to step 2.
+         * 169.254.x.x  -> you joined but got no address (AP/DHCP not ready):
+                           wait 20 s and reconnect, or the AP board isn't up.
+         * anything else (172.x, 10.x) -> Windows stayed on the OTHER Wi-Fi.
+                           Disconnect that one and connect ONLY to DEMO-DONT JOIN.
+
+  2) Run the server by itself so you can read its messages:
+       py server/luna_server.py
+     Watch the console:
+       "laptop on demo Wi-Fi as 192.168.4.x"  -> good; boards should appear in a
+                                                 few seconds at http://127.0.0.1:8080
+       "laptop is NOT on the demo Wi-Fi"       -> back to step 1, you're not on the subnet.
+
+  3) Still empty but step 2 said you're ON the demo Wi-Fi?
+     a) Windows Firewall may be dropping the boards' replies. Open PowerShell
+        **as Administrator** and run (one line):
+          New-NetFirewallRule -DisplayName "Moth boards" -Direction Inbound -Action Allow -Protocol UDP -LocalPort 5006,5007
+        Then set the demo Wi-Fi to a Private network:
+          Get-NetConnectionProfile            (note the demo Wi-Fi's InterfaceIndex)
+          Set-NetConnectionProfile -InterfaceIndex <that number> -NetworkCategory Private
+        Re-run the server.
+     b) Check the boards themselves (Callum's side): all 3 powered? The AP board
+        (A) makes the network; if DEMO-DONT JOIN exists, A is up, but B and C must
+        also be powered and joined. Were they flashed with THIS network's password?
+
+  4) Confirm packets are arriving at all: the dashboard's node/board count stays 0
+     if nothing reaches UDP 5007. If step 1 and 2 are green and it's still 0, it's
+     almost certainly the firewall (3a) or the boards (3b), not your laptop setup.
+================================================================
