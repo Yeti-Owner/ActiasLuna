@@ -1,0 +1,131 @@
+@import "tailwindcss";
+@import "./fonts.css";
+
+@theme {
+  --color-forest: #2E6F40;
+  --color-forest-deep: #214F2E;
+  --color-forest-ink: #12301D;
+  --color-forest-glow: #8FD3A5;
+  --color-on-forest: #FFFFFF;
+  --color-on-forest-muted: rgba(255, 255, 255, 0.78);
+  --color-on-forest-faint: rgba(255, 255, 255, 0.20);
+
+  --font-sans: var(--font-geist-sans), 'Geist Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), 'Geist Mono', ui-monospace, monospace;
+  --font-pixel: var(--font-geist-pixel), 'Geist Pixel', monospace;
+  --font-serif: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
+}
+
+:root {
+  --forest: #2E6F40;          /* page background */
+  --forest-deep: #214F2E;     /* darker shade: hero sky top, cards, borders */
+  --forest-ink: #12301D;      /* reeds, deepest shadows */
+  --forest-glow: #8FD3A5;     /* soft highlight (hero glow only) */
+  --on-forest: #FFFFFF;       /* primary text, lines, icons, moths */
+  --on-forest-muted: rgba(255, 255, 255, 0.78);   /* body text */
+  --on-forest-faint: rgba(255, 255, 255, 0.20);   /* inactive lines, dividers */
+}
+
+html, body {
+  background-color: #2E6F40;
+  color: #FFFFFF;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-geist-sans), 'Geist Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+code, kbd, samp, pre, .font-mono {
+  font-family: var(--font-geist-mono), 'Geist Mono', ui-monospace, monospace;
+}
+
+::selection {
+  background-color: #8FD3A5;
+  color: #12301D;
+}
+
+@keyframes sun-breathe {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+    filter: drop-shadow(0 0 20px rgba(253, 224, 71, 0.45)) drop-shadow(0 0 50px rgba(245, 158, 11, 0.25));
+  }
+  50% {
+    transform: translateY(-5px) scale(1.02);
+    filter: drop-shadow(0 0 32px rgba(253, 224, 71, 0.65)) drop-shadow(0 0 75px rgba(245, 158, 11, 0.4));
+  }
+}
+
+.animate-sun {
+  animation: sun-breathe 7s ease-in-out infinite;
+}
+
+@keyframes sun-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-sun-peek {
+  animation: sun-spin 120s linear infinite;
+  transform-origin: center center;
+}
+
+@keyframes butterfly-float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) rotate(3deg) scale(1.03);
+  }
+}
+
+@keyframes bee-hover {
+  0%, 100% {
+    transform: translateY(0px) rotate(-6deg);
+  }
+  25% {
+    transform: translateY(-4px) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-7px) rotate(-8deg);
+  }
+  75% {
+    transform: translateY(-3px) rotate(-4deg);
+  }
+}
+
+@keyframes ladybug-perch {
+  0%, 100% {
+    transform: scale(1) rotate(14deg);
+  }
+  50% {
+    transform: scale(1.04) rotate(16deg);
+  }
+}
+
+.animate-butterfly {
+  animation: butterfly-float 5s ease-in-out infinite;
+}
+
+.animate-bee {
+  animation: bee-hover 3.2s ease-in-out infinite;
+}
+
+.animate-ladybug {
+  animation: ladybug-perch 4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-sun,
+  .animate-sun-peek,
+  .animate-butterfly,
+  .animate-bee,
+  .animate-ladybug {
+    animation: none;
+  }
+}
