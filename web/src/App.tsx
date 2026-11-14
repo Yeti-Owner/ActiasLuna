@@ -6,7 +6,7 @@ import Nav from "@/components/nav"
 import ScrollMoth from "@/components/ui/scroll-moth"
 import TimelineSection from "@/components/timeline-section"
 import TwoWaysSection from "@/components/two-ways-section"
-import SecurityPrivacySection from "@/components/security-privacy-section"
+import HackathonTracksSection from "@/components/hackathon-tracks-section"
 import LaunchSection from "@/components/launch-section"
 import Footer from "@/components/footer"
 
@@ -38,8 +38,8 @@ export default function App() {
       {/* 3. Two ways to see someone */}
       <TwoWaysSection />
 
-      {/* 4. Security and privacy */}
-      <SecurityPrivacySection />
+      {/* 4. Hackathon tracks */}
+      <HackathonTracksSection />
 
       {/* 5. Launch dashboard & phone setup */}
       <LaunchSection />

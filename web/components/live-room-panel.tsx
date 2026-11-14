@@ -30,7 +30,7 @@ export default function LiveRoomPanel() {
   }, [])
 
   return (
-    <div data-moth-avoid className="live-room-panel overflow-hidden rounded-2xl border border-white/15 bg-[#09170f] shadow-2xl">
+    <div id="live-room" data-moth-avoid className="live-room-panel scroll-mt-8 overflow-hidden rounded-2xl border border-white/15 bg-[#09170f] shadow-2xl">
       {status === "connected" ? (
         <iframe src={viewerUrl} title="Live 3D room" className="live-room-frame block w-full border-0" />
       ) : (

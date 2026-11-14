@@ -218,3 +218,10 @@ code, kbd, samp, pre, .font-mono {
 @media (prefers-reduced-motion: reduce) { .luna-flyer { display: none; } }
 
 .live-room-frame { height: clamp(420px, 65vh, 680px); }
+
+.track-logo-cloud .track-brand { font-family: 'Geist Sans', system-ui, sans-serif; color: rgba(255,255,255,.92); }
+.track-cyber { font-size: clamp(13px, 1.5vw, 17px); font-weight: 550; letter-spacing: -.035em; }
+@media (prefers-reduced-motion: reduce) { .track-logo-cloud > div { transition: none; } }
+
+.winning-headline { font-size: clamp(28px, 6.1vw, 68px); line-height: 1.15; text-shadow: 0 2px 24px rgba(7, 29, 15, .25); }
+@media (max-width: 380px) { .winning-headline { font-size: 25px; } }

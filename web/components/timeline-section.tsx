@@ -5,9 +5,7 @@ import LiveRoomPanel from "@/components/live-room-panel"
 const MOTH_MILESTONES: Milestone[] = [
   {
     id: "1",
-    title: "The problem we found",
-    description:
-      "Wi-Fi can reveal more than people expect. The signals a phone sends can help nearby receivers estimate where it is, even without GPS or reading its messages. In experimental setups, changes in radio signals can also reveal a person’s presence without a phone. Actias Luna makes this often invisible privacy risk visible through a local, consent-based demo.",
+    title: "What if your Wi-Fi could tell you someone’s there without a camera?",
   },
   {
     id: "2",
