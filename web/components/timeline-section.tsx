@@ -36,7 +36,7 @@ const MOTH_MILESTONES: Milestone[] = [
 
 export default function TimelineSection() {
   return (
-    <section className="relative w-full max-w-7xl mx-auto pt-16 pb-20">
+    <section data-moth-flight-zone="right" className="relative w-full max-w-7xl mx-auto pt-16 pb-20">
       <GardenInsect species="dragonfly" className="insect-timeline" />
 
       <div className="px-6 md:px-16 mb-8 text-left">

@@ -79,13 +79,13 @@ export default function ScrollMoth({ width = 78, flapSpeed = .75, flapDepth = .4
     let last = performance.now()
     let raf = 0
 
-    const gapsAt = (cy: number) => {
+    const gapsAt = (cy: number, minX = 9) => {
       const halfHeight = size * .58 + 10
       const blocked = blocks.filter(b => b.bottom > cy - halfHeight && b.top < cy + halfHeight)
         .map(b => [Math.max(0, b.left - 10), Math.min(viewportWidth, b.right + 10)])
         .sort((a, b) => a[0] - b[0])
       const gaps: number[][] = []
-      let edge = 9
+      let edge = minX
       for (const [l, r] of blocked) {
         if (l > edge) gaps.push([edge, l])
         edge = Math.max(edge, r)
@@ -106,7 +106,20 @@ export default function ScrollMoth({ width = 78, flapSpeed = .75, flapDepth = .4
       previousScroll = sy
       scrollEnergy += (clamp(scrollVelocity / 1100, 0, 1) - scrollEnergy) * (1 - Math.exp(-dt * 3))
       const desiredY = viewportHeight * (.28 + progress * .36) + Math.sin(clock * .85) * 11
-      const desiredX = viewportWidth * (.5 + .38 * Math.sin(clock * .18 + progress * 7))
+      // Read the current zone bounds: loading the room can change the timeline's height.
+      const zone = document.querySelector('[data-moth-flight-zone="right"]')?.getBoundingClientRect()
+      const keepRight = !!zone && zone.top < viewportHeight && zone.bottom > 0
+      const minFlightX = keepRight ? viewportWidth * .65 : 9
+      const minCenter = minFlightX + size / 2
+      if (keepRight && x < minCenter) {
+        // Re-enter invisibly on the right instead of drifting across the timeline moth.
+        x = minCenter
+        vx = 0
+        opacity = 0
+      }
+      const desiredX = keepRight
+        ? viewportWidth * (.82 + .1 * Math.sin(clock * .18 + progress * 7))
+        : viewportWidth * (.5 + .38 * Math.sin(clock * .18 + progress * 7))
       let targetX = viewportWidth - size * .38
       let targetY = desiredY
       let targetScale = .68
@@ -116,7 +129,7 @@ export default function ScrollMoth({ width = 78, flapSpeed = .75, flapDepth = .4
       // Pick a nearby pocket in two dimensions, with a cost for changing lanes.
       for (const offset of [0, -65, 65, -125, 125]) {
         const cy = clamp(desiredY + offset, 70, viewportHeight - 65)
-        for (const [l, r] of gapsAt(cy + sy)) {
+        for (const [l, r] of gapsAt(cy + sy, minFlightX)) {
           const available = r - l
           if (available < size * .59 + 10) continue
           const candidateScale = Math.min(1, (available - 10) / size)
@@ -135,6 +148,7 @@ export default function ScrollMoth({ width = 78, flapSpeed = .75, flapDepth = .4
       }
       // Limit acceleration when a new pocket appears across the page.
       ;[x, vx] = glide(x, vx, x + clamp(targetX - x, -200, 200), 2.5, dt)
+      if (keepRight && x < minCenter) { x = minCenter; vx = Math.max(0, vx) }
       ;[y, vy] = glide(y, vy, targetY, 2.8, dt)
       scale += (targetScale - scale) * (1 - Math.exp(-dt * 2.8))
       bank += (clamp(vx * .09 - vy * .025, -19, 19) - bank) * (1 - Math.exp(-dt * 3.8))
@@ -152,6 +166,8 @@ export default function ScrollMoth({ width = 78, flapSpeed = .75, flapDepth = .4
       flight.style.transform = `rotate(${bank.toFixed(2)}deg) scale(${scale.toFixed(3)})`
 
       let alpha = found ? .94 : .1
+      // Fade during a lane change rather than pass over the timeline's own moth.
+      if (keepRight) alpha *= clamp((x - minFlightX) / (size * .45), 0, 1)
       const halfW = size * scale * .48
       const halfH = size * scale * .5
       if (blocks.some(b => x + halfW > b.left && x - halfW < b.right && y + sy + halfH > b.top && y + sy - halfH < b.bottom)) alpha = .08
