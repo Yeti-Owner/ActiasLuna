@@ -31,6 +31,8 @@ def main():
     ap = argparse.ArgumentParser(description="Start the Moth demo (server + optional simulator + optional button).")
     ap.add_argument("--sim", action="store_true", help="also run the board simulator (no hardware needed)")
     ap.add_argument("--button", action="store_true", help="also bridge the Uno Q white button over USB")
+    ap.add_argument("--cloud", action="store_true",
+                    help="also record room history: local history server (until Vultr is ready) + uploader")
     ap.add_argument("--port", type=int, default=8080, help="dashboard port (default 8080)")
     args = ap.parse_args()
 
@@ -63,6 +65,20 @@ def main():
     # 3) the white-button bridge (optional) -- reaches the Uno Q over USB/adb
     if args.button:
         start("white-button bridge", [PY, os.path.join("tools", "unoq_button_adb.py")], ROOT)
+
+    # 4) room history (optional): the local history server unless config/cloud.json points at Vultr, + the uploader
+    if args.cloud:
+        cfg_path = os.path.join(ROOT, "config", "cloud.json")
+        local = True
+        if os.path.exists(cfg_path):
+            import json
+            with open(cfg_path, encoding="utf-8") as f:
+                local = json.load(f).get("url", "").startswith("http://127.0.0.1")
+        if local:
+            start("room history server (local)", [PY, os.path.join("tools", "local_cloud.py")], ROOT)
+            time.sleep(1.5)
+        start("occupancy uploader", [PY, os.path.join("tools", "occupancy_uploader.py"),
+                                     "--dashboard", f"http://127.0.0.1:{args.port}"], ROOT)
 
     print("-" * 68)
     print(f"  Open the dashboard:   http://127.0.0.1:{args.port}/")

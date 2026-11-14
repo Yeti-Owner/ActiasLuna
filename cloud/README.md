@@ -10,6 +10,12 @@ ESP32 boards → laptop dashboard ──tools/occupancy_uploader.py──► Vul
 
 **What gets stored:** per moment, how many people were *in* the room, how many other devices were heard *nearby*, and which board people were closest to. **No MAC addresses, names, or positions.** Simulated crowd decoys are never uploaded. Data older than 30 days is deleted automatically.
 
+## 0. No Vultr yet? Run it on the laptop
+```powershell
+py tools/demo_run.py --sim --cloud      # or: --button --cloud for the real boards
+```
+`--cloud` starts the same history server on `http://127.0.0.1:8000` (`tools/local_cloud.py`, history in `data/moth_local.db`) plus the uploader. The first run writes `config/cloud.json` with fresh tokens. The Chert agent runs on the laptop too, so it reads that local server directly. Once the VM exists, point `config/cloud.json` and the agent's `MOTH_API_URL` / `MOTH_QUERY_TOKEN` at Vultr; nothing else changes.
+
 ## 1. Create the VM (Vultr dashboard, ~2 min)
 1. **Deploy +** → **Cloud Compute – Shared CPU**
 2. Location: **Atlanta**, or whichever is closest to you
