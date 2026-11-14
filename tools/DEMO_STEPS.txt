@@ -1,5 +1,6 @@
-================================================================
+﻿================================================================
   MOTH DEMO - STEP BY STEP  (keep this; the demo Wi-Fi has no internet)
+  The demo Wi-Fi is named  WATCHING-YOU  (NOT "EmoryGuest" / "eduroam").
 ================================================================
 
 WHAT YOU HAVE
@@ -35,19 +36,19 @@ ONE-TIME SETUP (do this now, while you still have internet):
        http://127.0.0.1:8080/api/crowd       (each visit flips them on/off)
 
 ----------------------------------------------------------------
-  B) REAL RUN - actual ESP32 boards on "DEMO-DONT JOIN"
+  B) REAL RUN - actual ESP32 boards on "WATCHING-YOU"
 ----------------------------------------------------------------
   Needs (Callum's side): the 3 ESP32-S3 boards flashed (1 AP + 2 RX) and powered,
   config/network.json set, and secrets generated. If the boards aren't flashed yet,
   use the PRACTICE RUN above - it exercises the same server and 3D view.
 
   1. Power on the ESP32 boards.
-  2. Join the laptop to the  DEMO-DONT JOIN  network.
+  2. Join the laptop to the  WATCHING-YOU  network.
   3. Plug the Uno Q into the laptop by USB.
   4. In the terminal:
        py tools/demo_run.py --button
   5. Open:   http://127.0.0.1:8080
-     - The boards appear as they come online. A phone that joins DEMO-DONT JOIN
+     - The boards appear as they come online. A phone that joins WATCHING-YOU
        shows up and can be tracked (do the calibration walk from the phone page).
      - "No signal / empty map" means the boards or the laptop aren't on the demo
        Wi-Fi yet, OR the boards aren't flashed/configured. That is the real detection
@@ -62,7 +63,7 @@ ONE-TIME SETUP (do this now, while you still have internet):
   - Dashboard 3D view is blank -> it uses bundled three.js and works offline; reload once.
   - White button does nothing  -> is the Uno Q plugged in by USB? Only ONE program can
       use the button at a time (don't run two button bridges / don't keep Serial Monitor open).
-  - Map stays empty in the REAL run -> boards/laptop not on DEMO-DONT JOIN, or boards not flashed.
+  - Map stays empty in the REAL run -> boards/laptop not on WATCHING-YOU, or boards not flashed.
   - Decoys appear but map is empty -> that's expected; decoys are simulated and do NOT need signal.
 
   The dashboard is always at:   http://127.0.0.1:8080/
@@ -76,15 +77,15 @@ when the boards can't reach the laptop. The boards only appear when the laptop i
 truly ON the demo subnet. Check these IN ORDER:
 
   1) JOIN the network, then prove you got a demo address:
-       - Join DEMO-DONT JOIN in Windows Wi-Fi (the password is whatever Callum
-         flashed into the boards - ask him if "DEMO-DONT JOIN" won't accept it).
+       - Join WATCHING-YOU in Windows Wi-Fi (the password is whatever Callum
+         flashed into the boards - ask him if "WATCHING-YOU" won't accept it).
        - Open a terminal and run:   ipconfig
        - The Wi-Fi adapter MUST show   IPv4 Address . . . 192.168.4.x
          * 192.168.4.x  -> good, go to step 2.
          * 169.254.x.x  -> you joined but got no address (AP/DHCP not ready):
                            wait 20 s and reconnect, or the AP board isn't up.
          * anything else (172.x, 10.x) -> Windows stayed on the OTHER Wi-Fi.
-                           Disconnect that one and connect ONLY to DEMO-DONT JOIN.
+                           Disconnect that one and connect ONLY to WATCHING-YOU.
 
   2) Run the server by itself so you can read its messages:
        py server/luna_server.py
@@ -102,10 +103,11 @@ truly ON the demo subnet. Check these IN ORDER:
           Set-NetConnectionProfile -InterfaceIndex <that number> -NetworkCategory Private
         Re-run the server.
      b) Check the boards themselves (Callum's side): all 3 powered? The AP board
-        (A) makes the network; if DEMO-DONT JOIN exists, A is up, but B and C must
+        (A) makes the network; if WATCHING-YOU exists, A is up, but B and C must
         also be powered and joined. Were they flashed with THIS network's password?
 
   4) Confirm packets are arriving at all: the dashboard's node/board count stays 0
      if nothing reaches UDP 5007. If step 1 and 2 are green and it's still 0, it's
      almost certainly the firewall (3a) or the boards (3b), not your laptop setup.
 ================================================================
+
