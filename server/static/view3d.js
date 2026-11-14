@@ -101,6 +101,11 @@ class RoomView {
     this.home = { target: new THREE.Vector3(cx, 0.6, cz), pos: new THREE.Vector3(cx + span * 0.15, span * 1.15, cz + span * 1.25) };
     if (!this.cameraPlaced) { this.resetView(); this.cameraPlaced = true; }
 
+    if (scan && scan.kind === "mesh") {
+      try { await this.loadMeshScan(scan, layout.polygon); return; }
+      catch (e) { console.warn("room scan failed to load, drawing the outline instead", e); this.roomG.clear(); }
+    }
+
     const grid = [];
     for (let f = 0; f * FT <= b.x1 + 1e-6; f++) grid.push(f * FT, 0.004, b.y0, f * FT, 0.004, b.y1);
     for (let f = 0; f * FT <= b.y1 + 1e-6; f++) grid.push(b.x0, 0.004, f * FT, b.x1, 0.004, f * FT);
@@ -108,11 +113,44 @@ class RoomView {
     gridGeo.setAttribute("position", new THREE.Float32BufferAttribute(grid, 3));
     this.roomG.add(new THREE.LineSegments(gridGeo, new THREE.LineBasicMaterial({ color: 0x252d4a, transparent: true, opacity: 0.7 })));
 
-    if (scan) {
+    if (scan && scan.kind !== "mesh") {
       try { await this.loadScan(scan, b); return; }
       catch (e) { console.warn("room scan failed to load, drawing the outline instead", e); this.roomG.clear(); }
     }
     this.outlineRoom(layout.polygon);
+  }
+
+  // Textured photogrammetry mesh from tools/import_scan.py. Lighting is baked into the photos, so it is drawn unlit.
+  // Its normals face into the room: front faces only drops the ceiling and the walls nearest the camera (cut-away view).
+  // The mesh is in the scan's frame; if the layout outline differs, the layout is drawn on top so the mismatch shows.
+  async loadMeshScan(scan, layoutPoly) {
+    const gltf = await new GLTFLoader().loadAsync("/scan.glb");
+    const root = gltf.scene, t = scan.transform;
+    const holder = new THREE.Group();
+    root.rotation.y = t.yaw || 0;
+    holder.position.set(-t.x0, -t.floor_y, -t.z0);
+    holder.add(root);
+    this.roomG.add(holder);
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      const old = o.material;
+      o.material = new THREE.MeshBasicMaterial({ map: old.map, side: THREE.FrontSide });
+      old.dispose();
+    });
+    const same = JSON.stringify(scan.polygon.map((p) => p.map((v) => v.toFixed(2)))) === JSON.stringify(layoutPoly.map((p) => p.map((v) => v.toFixed(2))));
+    if (!same) {
+      const pts = layoutPoly.concat([layoutPoly[0]]).map((p) => new THREE.Vector3(p[0], 0.03, p[1]));
+      this.roomG.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xee6a73, depthTest: false })));
+      const tag = labelSprite("layout outline (doesn't match scan)", { size: 0.12, color: "#ee6a73" });
+      tag.position.set(layoutPoly[0][0], 0.2, layoutPoly[0][1]);
+      this.roomG.add(tag);
+    }
+    for (const o of scan.objects || []) {
+      const fx = o.footprint.map((p) => p[0]), fy = o.footprint.map((p) => p[1]);
+      const tag = labelSprite(o.label, { size: 0.12, color: "#cdd3e8", bg: "rgba(12,15,28,0.55)" });
+      tag.position.set((Math.min(...fx) + Math.max(...fx)) / 2, (o.height || 0.8) + 0.15, (Math.min(...fy) + Math.max(...fy)) / 2);
+      this.roomG.add(tag);
+    }
   }
 
   outlineRoom(poly) {
@@ -216,11 +254,12 @@ class RoomView {
     const glow = new THREE.Mesh(new THREE.SphereGeometry(0.16, 24, 16), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false }));
     glow.position.y = PERSON_H;
     const post = vline(0.01, PERSON_H, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5 }));
-    const disc = flatDisc(new THREE.CircleGeometry(1, 48), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }));
+    // Floor marks skip the depth test: a scanned floor is bumpy by a few cm and would swallow them.
+    const disc = flatDisc(new THREE.CircleGeometry(1, 48), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, depthWrite: false, depthTest: false, side: THREE.DoubleSide }));
     disc.position.y = 0.012;
-    const ring = flatDisc(new THREE.RingGeometry(0.97, 1, 64), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+    const ring = flatDisc(new THREE.RingGeometry(0.97, 1, 64), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false, depthTest: false, side: THREE.DoubleSide }));
     ring.position.y = 0.013;
-    const trail = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+    const trail = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, depthTest: false }));
     g.add(orb, glow, post, disc, ring);
     g.userData = { orb, glow, post, disc, ring, trail, pos: new THREE.Vector3(e.x, 0, e.y), unc: e.unc, color };
     return g;

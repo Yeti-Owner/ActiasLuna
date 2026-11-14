@@ -35,6 +35,10 @@ ROUTE_INSET_M = 0.35
 FURNITURE_MARGIN_M = 0.25
 N_CHECKS = 3
 MIN_DOT_GAP_M = 0.5
+# "I'm here" plan: a grid of spots MARK_SPACING_M apart, walked as a serpentine so each next spot is a neighbour. A
+# spot is done once a calibrated spot lies within MARK_DONE_M (taps snap to plan spots, so normally exactly on it).
+MARK_SPACING_M = 0.9
+MARK_DONE_M = 0.4
 
 
 def _centroid(poly):
@@ -305,3 +309,60 @@ def check_points(polygon, objects, route=None) -> List[List[float]]:
     while len(picks) < min(N_CHECKS, len(pool)):
         picks.append(max(pool, key=lambda c: min(math.hypot(c[0] - p[0], c[1] - p[1]) for p in picks)))
     return [[round(x, 2), round(y, 2)] for x, y in picks]
+
+
+def mark_plan(polygon, objects) -> List[List[float]]:
+    """Spots to mark, in walking order: rows along the room's long side, alternate rows reversed (no doubling back).
+
+    Rows are spaced to fit the room evenly at about MARK_SPACING_M, kept ROUTE_INSET_M off the walls; spots in or
+    hugging furniture people can't stand in are dropped, so a row may have gaps.
+    """
+    xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
+    x0, x1, y0, y1 = min(xs) + ROUTE_INSET_M, max(xs) - ROUTE_INSET_M, min(ys) + ROUTE_INSET_M, max(ys) - ROUTE_INSET_M
+    if x1 < x0 or y1 < y0:
+        return []
+    along_x = (x1 - x0) >= (y1 - y0)
+
+    def ticks(lo, hi):
+        n = max(1, round((hi - lo) / MARK_SPACING_M)) + 1
+        return [lo + (hi - lo) * i / (n - 1) for i in range(n)] if n > 1 else [(lo + hi) / 2]
+
+    rows = ticks(y0, y1) if along_x else ticks(x0, x1)
+    cols = ticks(x0, x1) if along_x else ticks(y0, y1)
+    plan = []
+    for r, v in enumerate(rows):
+        for u in (cols if r % 2 == 0 else cols[::-1]):
+            x, y = (u, v) if along_x else (v, u)
+            if _standable(x, y, polygon, objects, FURNITURE_MARGIN_M):
+                plan.append([round(x, 2), round(y, 2)])
+    return plan
+
+
+def plan_done(plan, taken) -> List[bool]:
+    return [any(math.hypot(p[0] - t[0], p[1] - t[1]) <= MARK_DONE_M for t in taken) for p in plan]
+
+
+def plan_next(plan, done, last=None, near=None) -> Optional[int]:
+    """Index of the plan spot to mark next, or None when all are done.
+
+    Carries on from the plan spot nearest `last` (the latest mark): onwards along the plan if anything is left that
+    way, else back the other way, so starting at either end works. With no usable latest mark it starts at the plan
+    end closest to `near` (the phone's estimate) if nothing is done yet, else at the open spot closest to it.
+    """
+    open_ = [i for i, d in enumerate(done) if not d]
+    if not open_:
+        return None
+    if len(open_) == len(plan):
+        open_ = [0, len(plan) - 1]
+    if last is not None:
+        i = min(range(len(plan)), key=lambda k: math.hypot(plan[k][0] - last[0], plan[k][1] - last[1]))
+        if math.hypot(plan[i][0] - last[0], plan[i][1] - last[1]) <= MARK_DONE_M:
+            ahead = [k for k in open_ if k > i]
+            behind = [k for k in open_ if k < i]
+            if ahead and (not behind or i == 0 or done[i - 1]):
+                return ahead[0]
+            if behind:
+                return behind[-1]
+    if near is not None:
+        return min(open_, key=lambda k: math.hypot(plan[k][0] - near[0], plan[k][1] - near[1]))
+    return open_[0]

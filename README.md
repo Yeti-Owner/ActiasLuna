@@ -21,7 +21,7 @@ No phone, no app, no login. The boards ping each other many times a second, and 
 ## How it works
 
 1. **Listen.** Each board keeps only the radio header of each frame (sender, network, signal strength) and summarises it every 250 ms.
-2. **Map.** A short calibration walk teaches the system how signal strength varies across your room, walls and furniture included.
+2. **Map.** Stand somewhere, tap that spot on the phone and press *I'm here*. Each mark first measures how far off the map was there, then teaches it, and the walk between marks teaches the compass and stride. A few marks cover a room (a guided walk is the alternative).
 3. **Track.** A Bayesian grid filter fuses readings over time with motion (phone sensors or the radio itself) to get far more precise than any single reading.
 4. **Show.** A live dashboard draws everyone on a floor plan or a scanned 3D model of the room.
 
@@ -31,7 +31,7 @@ No phone, no app, no login. The boards ping each other many times a second, and 
 - **Strangers are filtered on the board.** Firmware drops every frame not addressed to the demo network before it reaches the laptop.
 - **Consent gate.** In connected mode only phones that deliberately joined the demo network are tracked. Leave it and you disappear.
 - **Offline.** The demo network has no internet; nothing is uploaded.
-- **Locked-down dashboard.** The dashboard listens on `localhost` only. The phone page is HTTPS behind a 4-digit PIN with lockout.
+- **Locked-down dashboard.** The dashboard listens on `localhost` only. The phone page is HTTPS and answers only devices on the demo network.
 - **No secrets in the repo.** Wi-Fi credentials and certificates are generated from one config file and never committed.
 - **Phone-free mode is opt-in.** It sees anyone in the room, so it is an explicit switch. Tell people when it's on.
 
@@ -53,7 +53,11 @@ cd ../..
 python server/luna_server.py                           # dashboard at http://127.0.0.1:8080
 ```
 
-Join a phone to `DEMO-DONT JOIN`, walk the calibration route from the phone page, and watch yourself move on the map.
+Join a phone to `DEMO-DONT JOIN`, open the phone page, mark a few spots with *I'm here*, and watch yourself move on the map.
+
+Have a textured room scan (.glb, or a .zip holding one)? `python tools/import_scan.py scan.zip --set-layout` measures
+the room outline and furniture from it, sizes the layout to match and puts the scan in the 3D view. Add
+`--rotate 1..3` if the scan's corner (0, 0) isn't the one your board positions are measured from.
 
 No boards yet? Run `python tools/sim_nodes.py` and start the server with
 `--targets 127.0.0.1:6101,127.0.0.1:6102,127.0.0.1:6103`.
