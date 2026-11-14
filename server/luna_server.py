@@ -204,13 +204,17 @@ class App:
         # agreement]}; stride: metres per counted step. See sensing.py and walkcal.py.
         calib.setdefault("df_walk", [])
         calib.setdefault("heading", {})
-        # Raw walk captures. Walk spots, heading and stride derive from them, so a new walkcal.VERSION rebuilds them
-        # here instead of asking for another walk.
+        # Raw walk captures. Walk spots, heading and stride derive from them (and from legs), so a new walkcal.VERSION
+        # rebuilds them here instead of asking for another walk.
         calib.setdefault("walks", [])
         # Walks between consecutive "I'm here" marks: compass and stride only (walkcal.leg_fit).
         calib.setdefault("legs", [])
-        if calib["walks"] and calib.get("walkcal_v") != walkcal.VERSION:
-            self._derive_walks(calib)
+        if calib.get("walkcal_v") != walkcal.VERSION:
+            if calib["walks"]:
+                self._derive_walks(calib)
+            elif calib["legs"]:
+                self._refit_motion(calib)
+                calib["walkcal_v"] = walkcal.VERSION
         return calib
 
     @staticmethod

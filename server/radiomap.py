@@ -130,6 +130,7 @@ class Grid:
         mask[self.flat] = 1.0
         self.mask = mask.reshape(self.ny, self.nx)
         self._kernels: Dict[int, tuple] = {}
+        self._masks: Dict[Tuple[int, int], np.ndarray] = {}
 
     def dense(self, v) -> np.ndarray:
         out = np.zeros(self.ny * self.nx)
@@ -195,6 +196,16 @@ class Grid:
         out[dst] = d[src]
         return out
 
+    def _mask_from(self, ix: int, iy: int) -> np.ndarray:
+        """Which cells have an existing cell (ix, iy) away; shift and shift_adj share it. Read-only."""
+        key = (ix, iy)
+        cached = self._masks.get(key)
+        if cached is None:
+            if len(self._masks) > 256:
+                self._masks.clear()
+            cached = self._masks[key] = self._translate(self.mask, -ix, -iy)
+        return cached
+
     def shift(self, b: np.ndarray, dx: float, dy: float) -> np.ndarray:
         """Move belief by (dx, dy) metres, split bilinearly over 4 cells. Mass that would leave the room stays put.
 
@@ -206,7 +217,7 @@ class Grid:
         for ix, iy, w in self._bilinear(dx, dy):
             if w > 0:
                 moved += w * self._translate(d, ix, iy)
-                landed += w * self._translate(self.mask, -ix, -iy)
+                landed += w * self._mask_from(ix, iy)
         return self._sparse(moved * self.mask + d * (1.0 - landed))
 
     def shift_adj(self, b: np.ndarray, dx: float, dy: float) -> np.ndarray:
@@ -216,7 +227,7 @@ class Grid:
         for ix, iy, w in self._bilinear(dx, dy):
             if w > 0:
                 moved += w * self._translate(d, -ix, -iy)
-                landed += w * self._translate(self.mask, -ix, -iy)
+                landed += w * self._mask_from(ix, iy)
         return self._sparse(moved + d * (1.0 - landed))
 
 
