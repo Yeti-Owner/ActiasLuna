@@ -1,0 +1,4 @@
+numpy>=1.24
+# optional: HTTPS phone page (tools/gen_secrets.py) and serial logs (tools/serial_log.py)
+cryptography
+pyserial

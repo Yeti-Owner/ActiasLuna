@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ActiasLuna calibration</title>
+<style>
+:root { --bg: #0c0f1c; --card: #1a2036; --fg: #e7eaf6; --muted: #9ba3c2; --acc: #3e9e74; --hi: #8fdcb2; --warn: #e6b24c; --blue: #7fa8ff; --bad: #ff8a8a; }
+* { box-sizing: border-box; }
+body { max-width: 640px; margin: auto; padding: 12px; background: var(--bg); color: var(--fg); font: 17px/1.45 -apple-system, system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+h1 { font-size: 19px; margin: 2px 0 8px; }
+h2 { font-size: 21px; margin: 0 0 6px; }
+.card { background: var(--card); border-radius: 14px; padding: 12px; margin: 10px 0; }
+button { font: inherit; color: var(--fg); background: #2b3455; border: 0; border-radius: 11px; padding: 12px 14px; margin: 4px 4px 4px 0; }
+button.primary { background: var(--acc); }
+button:disabled { opacity: .45; }
+button.huge { display: block; width: 100%; margin: 8px 0; padding: 22px 12px; font-size: 23px; font-weight: 600; }
+.tabs { display: flex; gap: 6px; }
+.tabs button { flex: 1; margin: 0; font-weight: 600; }
+.tabs button.on { background: #2c3a64; outline: 2px solid var(--blue); }
+select, input { font: inherit; color: #fff; background: #090b16; border: 1px solid #3a4266; border-radius: 9px; padding: 10px; }
+canvas { display: block; width: 100%; margin-top: 10px; background: #090b16; border-radius: 12px; touch-action: none; }
+ol { margin: 4px 0 6px; padding-left: 22px; }
+li { margin: 3px 0; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+.big { font-size: 22px; font-weight: 600; }
+.prog { height: 12px; margin-top: 8px; overflow: hidden; border-radius: 6px; background: #232b46; }
+.prog > div { height: 100%; background: var(--acc); }
+.hidden { display: none !important; }
+.err { color: var(--bad); }
+.ok { color: var(--hi); font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>◐ ActiasLuna calibration</h1>
+<div id="pinCard" class="card">
+  <div>Enter the 4-digit PIN shown on the laptop (Setup &amp; debug → Calibrate):</div>
+  <div class="row"><input id="pin" inputmode="numeric" maxlength="4" size="5" autocomplete="off"><button class="primary" id="pinGo">OK</button></div>
+  <div id="pinErr" class="err small"></div>
+</div>
+<div id="app" class="hidden">
+  <div class="tabs"><button data-mode="walk" class="on">1 · Walk</button><button data-mode="check">2 · Check</button><button data-mode="more">More</button></div>
+  <div class="card row small" id="motionCard"><button id="motionBtn">Turn on motion</button><span id="motionTxt" class="muted">Keeps the dot steady while you stand still.</span></div>
+  <canvas id="map"></canvas>
+  <div class="card">
+    <h2 id="title"></h2>
+    <div id="help"></div>
+    <div id="status" class="big"></div>
+    <div id="prog" class="prog hidden"><div></div></div>
+    <div id="actions"></div>
+    <div id="flash" class="ok"></div>
+    <div id="err" class="err small"></div>
+  </div>
+  <div id="moreCard" class="card hidden small">
+    The phone is held: <select id="ori"><option value="hand">in hand</option><option value="front_pocket">in a front pocket</option><option value="back_pocket">in a back pocket</option><option value="bag">in a bag</option></select>
+    <div class="muted">Calibrate in hand first. A short extra walk with the phone in a pocket helps if people will carry it that way.</div>
+    <div class="muted" style="margin-top:8px">Tracking people without a phone needs one recording of the empty room:</div>
+    <button id="emptyBtn">Record the empty room (45 s)</button>
+    <button id="clearBtn">Start over (delete this room's calibration)</button>
+  </div>
+  <div class="small muted" id="me"></div>
+</div>
+<script src="/phone.js"></script>
+</body>
+</html>
