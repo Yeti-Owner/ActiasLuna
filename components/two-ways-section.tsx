@@ -2,17 +2,17 @@ export default function TwoWaysSection() {
   return (
     <section className="relative w-full max-w-5xl mx-auto px-6 md:px-16 py-16">
       <div className="mb-10 text-left">
-        <span className="font-mono text-xs uppercase tracking-widest text-white/60 mb-2 block">
+        <span data-moth-avoid className="font-mono text-xs uppercase tracking-widest text-white/60 mb-2 inline-block">
           Operation Modes
         </span>
-        <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-white">
+        <h2 data-moth-avoid className="text-3xl md:text-4xl font-bold tracking-tight text-white">
           Two ways to see someone
         </h2>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Card 1: Connected */}
-        <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-8 flex flex-col justify-between shadow-xl transition-all duration-300 hover:border-white/40">
+        <div data-moth-avoid className="rounded-2xl border border-white/20 bg-[#214F2E] p-8 flex flex-col justify-between shadow-xl transition-all duration-300 hover:border-white/40">
           <div>
             <div className="flex items-center justify-between mb-4">
               <span className="inline-block rounded-full border border-white/25 bg-white/10 px-3 py-1 font-mono text-xs tracking-widest text-white/80">
@@ -37,7 +37,7 @@ export default function TwoWaysSection() {
         </div>
 
         {/* Card 2: Not connected */}
-        <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-8 flex flex-col justify-between shadow-xl transition-all duration-300 hover:border-white/40">
+        <div data-moth-avoid className="rounded-2xl border border-white/20 bg-[#214F2E] p-8 flex flex-col justify-between shadow-xl transition-all duration-300 hover:border-white/40">
           <div>
             <div className="flex items-center justify-between mb-4">
               <span className="inline-block rounded-full border border-white/25 bg-white/10 px-3 py-1 font-mono text-xs tracking-widest text-white/80">
@@ -64,4 +64,3 @@ export default function TwoWaysSection() {
     </section>
   )
 }
-

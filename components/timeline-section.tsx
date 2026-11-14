@@ -42,10 +42,10 @@ export default function TimelineSection() {
   return (
     <section className="relative w-full max-w-5xl mx-auto pt-16 pb-20">
       <div className="px-6 md:px-16 mb-8 text-left">
-        <span className="font-mono text-xs uppercase tracking-widest text-white/60 mb-2 block">
+        <span data-moth-avoid className="font-mono text-xs uppercase tracking-widest text-white/60 mb-2 inline-block">
           Architecture
         </span>
-        <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-white">
+        <h2 data-moth-avoid className="text-3xl md:text-4xl font-bold tracking-tight text-white">
           How Moth works
         </h2>
       </div>
@@ -53,4 +53,3 @@ export default function TimelineSection() {
     </section>
   )
 }
-

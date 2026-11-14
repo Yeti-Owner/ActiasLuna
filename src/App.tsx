@@ -6,6 +6,7 @@ import { GeistSerif, GeistSerifRegular, GeistSerifSquare, GeistSerifTriangle, Ge
 
 import Hero from "@/components/hero"
 import Nav from "@/components/nav"
+import ScrollMoth from "@/components/ui/scroll-moth"
 import TimelineSection from "@/components/timeline-section"
 import TwoWaysSection from "@/components/two-ways-section"
 import SecurityPrivacySection from "@/components/security-privacy-section"
@@ -22,6 +23,15 @@ export default function App() {
     >
       {/* 1. Logo Hero (Top of site, full screen, 100svh) */}
       <Hero />
+
+      {/* Flying white Luna moth starting under the logo */}
+      <ScrollMoth
+        src="/static/moth-luna/"
+        sprite="luna"
+        width={120}
+        flapSpeed={0.4}
+        flapDepth={0.5}
+      />
 
       {/* Sticky header after hero */}
       <Nav />

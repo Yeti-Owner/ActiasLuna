@@ -1,6 +1,6 @@
 export default function Nav() {
   return (
-    <header className="sticky top-0 z-40 w-full backdrop-blur-md bg-[#2E6F40]/80 border-b border-white/10 transition-colors">
+    <header data-moth-avoid className="sticky top-0 z-40 w-full backdrop-blur-md bg-[#2E6F40]/80 border-b border-white/10 transition-colors">
       <div className="max-w-5xl mx-auto flex h-16 items-center justify-between px-6 md:px-16">
         <a href="/" className="flex items-center gap-2 group">
           {/* Small moth icon in pure white */}
@@ -24,4 +24,3 @@ export default function Nav() {
     </header>
   )
 }
-

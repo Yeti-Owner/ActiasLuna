@@ -2,7 +2,7 @@ import MothWordmark from "@/components/ui/moth-wordmark"
 
 export default function Hero() {
   return (
-    <section className="relative w-full">
+    <section className="relative w-full" data-moth-ignore>
       <div className="w-full">
         <MothWordmark
           word="Actias"

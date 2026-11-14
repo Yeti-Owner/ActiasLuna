@@ -113,7 +113,7 @@ export default function Component({ milestones }: TimelineProps) {
                     isActive ? "translate-y-0 opacity-100" : "translate-y-8 opacity-30"
                   }`}
                 >
-                  <div className="mb-3 inline-block rounded-full border border-white/25 bg-white/10 px-3 py-1 font-mono text-xs tracking-widest text-white/80">
+                  <div data-moth-avoid className="mb-3 inline-block rounded-full border border-white/25 bg-white/10 px-3 py-1 font-mono text-xs tracking-widest text-white/80">
                     {milestone.date}
                   </div>
                   <h3 className="text-2xl font-bold tracking-tight text-white">

@@ -40,10 +40,10 @@ export default function SecurityPrivacySection() {
   return (
     <section className="relative w-full max-w-5xl mx-auto px-6 md:px-16 py-16">
       <div className="mb-10 text-left">
-        <span className="font-mono text-xs uppercase tracking-widest text-white/60 mb-2 block">
+        <span data-moth-avoid className="font-mono text-xs uppercase tracking-widest text-white/60 mb-2 inline-block">
           Trust & Safety
         </span>
-        <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-white">
+        <h2 data-moth-avoid className="text-3xl md:text-4xl font-bold tracking-tight text-white">
           Security and privacy by design
         </h2>
         <p className="mt-2 text-base text-white/80 max-w-2xl">
@@ -54,6 +54,7 @@ export default function SecurityPrivacySection() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {PRIVACY_ITEMS.map((item, i) => (
           <div
+            data-moth-avoid
             key={i}
             className={`rounded-xl border border-white/20 bg-[#214F2E] p-6 flex flex-col justify-between transition-all duration-300 hover:border-white/40 ${
               i === 6 ? "md:col-span-2 lg:col-span-1" : ""
@@ -78,4 +79,3 @@ export default function SecurityPrivacySection() {
     </section>
   )
 }
-

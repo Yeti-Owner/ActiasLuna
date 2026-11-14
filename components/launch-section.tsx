@@ -43,7 +43,7 @@ export default function LaunchSection() {
 
   return (
     <section className="relative w-full max-w-5xl mx-auto px-6 md:px-16 py-16">
-      <div className="rounded-3xl border border-white/20 bg-[#214F2E] p-8 md:p-12 shadow-2xl">
+      <div data-moth-avoid className="rounded-3xl border border-white/20 bg-[#214F2E] p-8 md:p-12 shadow-2xl">
         <div className="max-w-2xl mb-8">
           <span className="font-mono text-xs uppercase tracking-widest text-[#8FD3A5] mb-2 block">
             Live Demo
