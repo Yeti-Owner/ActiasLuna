@@ -18,7 +18,7 @@ export function Hero() {
   }, [inView, reduced])
 
   return (
-    <div ref={root} className="relative mx-auto flex w-full max-w-4xl flex-col items-center px-6 py-20 text-center md:px-10 md:py-28">
+    <div ref={root} className="relative mx-auto flex w-full max-w-4xl flex-col items-center px-6 pt-28 pb-12 text-center md:px-10 md:pt-40 md:pb-16">
       <h2 data-moth-avoid aria-label="We make privacy visible, understandable, and impossible to ignore." className="winning-headline w-full font-normal tracking-tight text-white">
         <span className="block">We make privacy</span>
         <span aria-hidden="true" className="relative block h-[1.35em] overflow-hidden text-[#d2e6ad]" style={{ perspective: 900 }}>
