@@ -171,8 +171,11 @@ def main():
                 print(f"uploaded {len(batch)} sample(s), {len(spool.items)} waiting", flush=True)
             except (urllib.error.URLError, OSError, ValueError) as exc:
                 next_flush = time.time() + backoff
-                print(f"cloud unreachable ({getattr(exc, 'reason', exc)}); {len(spool.items)} queued, "
-                      f"retry in {int(backoff)}s", flush=True)
+                if isinstance(exc, urllib.error.HTTPError) and exc.code == 401:
+                    why = "INGEST token rejected - put the real one in config/cloud.json, then restart"
+                else:
+                    why = f"cloud unreachable ({getattr(exc, 'reason', exc)})"
+                print(f"{why}; {len(spool.items)} samples saved for later, retry in {int(backoff)}s", flush=True)
                 backoff = min(backoff * 2, 300.0)
         time.sleep(args.interval)
 

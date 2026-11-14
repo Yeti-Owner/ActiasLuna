@@ -16,6 +16,7 @@ mesh/
 # Secrets (regenerate with tools/gen_secrets.py)
 config/network.json
 config/cloud.json
+config/cloud.*backup*.json
 config/certs/
 firmware/luna_node/main/luna_secrets.h
 *.pem
