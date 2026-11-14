@@ -93,12 +93,11 @@ class Replay:
     act at once. Lines before `start` seconds are fed without delay (seek); long recording gaps are capped at MAX_GAP_S.
     """
 
-    def __init__(self, fname: str, header: dict, lines: list, lock, get_ctx, boards, speed: float, start: float,
-                 hidden=()):
+    def __init__(self, fname: str, header: dict, lines: list, lock, get_ctx, boards, speed: float, start: float):
         self.file = fname
         self.pkts = lines
         self.lock = lock
-        self.tracker = Tracker(get_ctx, boards, hidden)
+        self.tracker = Tracker(get_ctx, boards)
         self.speed = max(0.01, speed)
         self.t0, self.t1 = lines[0]["rt"], lines[-1]["rt"]
         self.pos = self.t0

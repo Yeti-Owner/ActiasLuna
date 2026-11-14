@@ -86,8 +86,9 @@ No boards? `python tools/sim_nodes.py --real` simulates your boards at their sav
 
 ## Decoy crowd and the Uno Q button
 
-The crowd is a display effect: simulated phones (MACs `02:00:DE:C0:*`, labelled *SIMULATED*) that gather around the
-tracked person. Nothing is transmitted and the real estimate is untouched.
+The crowd is a display effect: simulated phones that gather around the tracked person. For the demo the dashboard
+shows them exactly like real phones (people list, 2D map, 3D view), with private-style MACs and trails. They are
+flagged `sim: true` in the server data, nothing is transmitted, and the real estimate is untouched.
 
 - **Uno Q white button:** plug the Uno Q in by USB and run `python tools/unoq_button_adb.py`. It reads the
   button over adb, so it needs Android platform-tools (`adb`); it finds the Arduino or Android SDK copy on its own,

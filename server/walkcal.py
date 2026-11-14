@@ -248,11 +248,6 @@ def _stride(legs: List[tuple]) -> Optional[float]:
     return min(STRIDE_MAX_M, max(STRIDE_MIN_M, sum(d for d, _ in plausible) / steps))
 
 
-def stride_fit(capture: dict):
-    """Metres per counted step over legs where the step counter ran (detectors and strides vary per person/phone)."""
-    return _stride(_stride_legs(capture))
-
-
 def leg_fit(leg: dict) -> Optional[dict]:
     """What one walk between two "I'm here" marks teaches: compass offset and steps, or None.
 

@@ -20,7 +20,6 @@ from tracker import Tracker
 
 WARMUP_S = 15.0
 SETTLE_S = 3.0
-STILL_S_MIN = 4.0
 
 
 def truths(calib: dict) -> List[dict]:

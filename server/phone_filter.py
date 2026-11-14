@@ -252,23 +252,24 @@ class Track:
         self.off += gain * (solved - self.off)
         self.off_sd = max(OFF_SD_MIN, self.off_sd * math.exp(-dt / OFF_TAU_S))
 
-    def smoothed(self, m: "rmap.RadioMap") -> list:
+    def smoothed(self, m: "rmap.RadioMap", after: float = -math.inf, step: float = 0.0) -> list:
         """Backward pass over the last SMOOTH_LAG_S: [(t, x, y, unc)] oldest first, each also using later readings.
 
-        The oldest entry is final; newer ones keep improving on later calls. Display / trail only.
+        Only points at least `step` s after `after` and after each other are summarised (the backward pass itself
+        still runs over every entry). The oldest entry is final; newer ones keep improving on later calls. Display /
+        trail only.
         """
         grid = m.grid
         hist = list(self.hist)
         if grid is None or not hist or len(hist[-1][1]) != len(m.cells):
             return []
         beta = np.ones(len(m.cells))
-        out = []
+        gammas = []
         for t, alpha, move, factor in reversed(hist):
             gamma = alpha * beta
             total = gamma.sum()
             if total > 0:
-                est = m.summary(gamma / total)
-                out.append((t, est["x"], est["y"], est["unc"]))
+                gammas.append((t, gamma, total))
             if move is None:
                 break
             beta = _backward(grid, factor * beta, move)
@@ -276,5 +277,12 @@ class Track:
             if peak <= 0:
                 break
             beta = beta / peak
-        out.reverse()
+        out = []
+        last = after
+        for t, gamma, total in reversed(gammas):
+            if t - last < step:
+                continue
+            last = t
+            est = m.summary(gamma / total)
+            out.append((t, est["x"], est["y"], est["unc"]))
         return out

@@ -45,7 +45,7 @@ function connect() {
   stream.onmessage = (ev) => {
     S = JSON.parse(ev.data);
     mergeBody(S);
-    mergeCrowd(S);
+    mergeDecoys(S);
     if (!editing) L = clone(S.layout);
     render();
   };
@@ -73,16 +73,16 @@ function mergeBody(s) {
   });
 }
 
-// Crowd mode (server/display.py): the simulated crowd replaces every real person in S.phones so everything draws it
-// like phones. Its MACs are fake and never go back to the server.
-function mergeCrowd(s) {
-  const c = s.crowd;
-  if (!c || !c.on) return;
-  s.phones = c.people.map((p) => ({
-    mac: p.mac, mac_fmt: p.mac.match(/../g).join(":"), name: "", associated: true, age: 0, per_node: {}, spark: [],
-    trail: p.trail.map((q) => [q[0], q[1], q[2], 0.4, "estimated"]),
-    est: { x: p.x, y: p.y, unc: 0.4, raw: [p.x, p.y, 0.4], kind: "estimated", receivers: 3, mode: "calibrated", age: 0, t: s.now },
-  }));
+// Demo crowd (server/crowd.py): decoys join S.phones looking exactly like tracked phones, so the list, the 2D map and
+// the 3D view all show them and the real person blends in. Their MACs are made up and never go back to the server.
+function mergeDecoys(s) {
+  for (const d of s.decoys || []) {
+    s.phones.push({
+      mac: d.mac, mac_fmt: d.mac.match(/../g).join(":"), name: "", associated: true, age: 0, per_node: {}, spark: [],
+      trail: d.trail.map((q) => [q[0], q[1], q[2], d.unc, "estimated"]),
+      est: { x: d.x, y: d.y, unc: d.unc, raw: [d.x, d.y, d.unc], kind: "estimated", receivers: 3, mode: "calibrated", age: 0, t: s.now },
+    });
+  }
 }
 
 // 3D view: needs WebGL and the bundled three.js; report failures instead of showing a black box.

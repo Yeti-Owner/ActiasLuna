@@ -1,12 +1,12 @@
 """Simulated decoy crowd: a display-only effect for the Moth dashboard.
 
-The point it makes: in a busy room, one person is harder to pick out of a crowd. To show that honestly, this draws
-extra SIMULATED phones that wander near the real person. It is cosmetic only:
+The point it makes: in a busy room, one person is harder to pick out of a crowd. This adds simulated phones that
+wander near the real person. It is cosmetic only:
 
 - It NEVER transmits anything over Wi-Fi and never creates real frames or packets.
-- It NEVER touches the raw Wi-Fi estimate. Accuracy numbers are measured without it (see ARCHITECTURE.md:
-  "Raw vs display" and the crowd.py row in the "Display only" section).
-- Every decoy is flagged `sim: True` and carries a reserved, clearly-fake MAC, so the UI can label it as simulated.
+- It NEVER touches the raw Wi-Fi estimate, so accuracy numbers are measured without it (like display.py).
+- Every decoy is flagged `sim: True` in the snapshot. For the demo the dashboard deliberately draws them as ordinary
+  phones (app.js mergeDecoys): private-style MACs, trails and a varying uncertainty, so they pass for real ones.
 
 Toggled over UDP by {"t": "crowd", "on": 0|1} or {"t": "crowd", "toggle": 1}; the Uno Q white button sends the toggle
 through tools/unoq_button_adb.py.
@@ -20,15 +20,24 @@ import random
 
 from room import as_room
 
-# Reserved, obviously-fake MAC prefix (locally-administered, documentation-style) so decoys can never be confused
-# with a real device and the UI can spot them: "02:00:DE:C0:..".  DE-C0 ~ "decoy".
-DECOY_PREFIX = "02:00:DE:C0"
 DEFAULT_COUNT = 8        # decoys when the crowd is on
 SPEED = 0.7              # m/s, a slow indoor walk
 TURN = 0.6              # rad/s, how sharply a decoy changes direction
 EDGE_MARGIN = 0.3        # m, keep decoys this far inside the room
 CLUSTER_R = 1.4          # m, decoys gather within this radius of the real person so the person blends in
 CLUSTER_STEER = 0.55     # how strongly a stray decoy turns back toward the person (0..1)
+# Trails and uncertainty shaped like tracker.py's (TRAIL_STEP_S) so decoys read as tracked phones.
+TRAIL_STEP_S = 0.5
+TRAIL_KEEP_S = 60.0
+UNC_M = (0.3, 0.55)      # each decoy's typical uncertainty radius (a tracked phone is ~0.3-0.6 m)
+UNC_WOBBLE_M = 0.08
+UNC_PERIOD_S = (6.0, 14.0)
+
+
+def private_mac(rng):
+    """Random MAC with the locally-administered bit set, like a phone's private Wi-Fi address (12 hex, no colons)."""
+    first = (rng.getrandbits(8) & 0xFC) | 0x02
+    return f"{first:02x}{rng.getrandbits(40):010x}"
 
 
 class CrowdState(enum.Enum):
@@ -38,10 +47,15 @@ class CrowdState(enum.Enum):
 
 class Decoy:
     def __init__(self, idx, w, d, rng):
-        self.mac = f"{DECOY_PREFIX}:{idx:02X}:{rng.randint(0, 255):02X}"
+        self.mac = private_mac(rng)
         self.x = rng.uniform(EDGE_MARGIN, max(w - EDGE_MARGIN, EDGE_MARGIN))
         self.y = rng.uniform(EDGE_MARGIN, max(d - EDGE_MARGIN, EDGE_MARGIN))
         self.heading = rng.uniform(-math.pi, math.pi)
+        self.unc_base = rng.uniform(*UNC_M)
+        self.unc_w = 2 * math.pi / rng.uniform(*UNC_PERIOD_S)
+        self.unc_phase = rng.uniform(0, 2 * math.pi)
+        self.unc = self.unc_base
+        self.trail = []          # [t, x, y], every TRAIL_STEP_S
         self._rng = rng
 
     def step(self, dt, w, d, room=None, center=None):
@@ -123,10 +137,16 @@ class Crowd:
         self._center = center
         for dec in self._decoys:
             dec.step(dt, w, d, room=rm, center=center)
+            dec.unc = dec.unc_base + UNC_WOBBLE_M * math.sin(dec.unc_w * t + dec.unc_phase)
+            if not dec.trail or t - dec.trail[-1][0] >= TRAIL_STEP_S:
+                dec.trail.append([t, dec.x, dec.y])
+            while dec.trail and t - dec.trail[0][0] > TRAIL_KEEP_S:
+                dec.trail.pop(0)
 
     def snapshot(self):
-        """Decoys for the snapshot. Empty when off. Every entry is flagged sim:True for the UI to label."""
-        return [{"mac": dec.mac, "x": round(dec.x, 2), "y": round(dec.y, 2), "sim": True}
+        """Decoys for the snapshot (empty when off), each flagged sim:True. Metres in the crowd's 0..w / 0..d frame."""
+        return [{"mac": dec.mac, "x": round(dec.x, 2), "y": round(dec.y, 2), "unc": round(dec.unc, 3),
+                 "trail": [[round(p[0], 2), round(p[1], 3), round(p[2], 3)] for p in dec.trail], "sim": True}
                 for dec in self._decoys]
 
     def handle_packet(self, p):

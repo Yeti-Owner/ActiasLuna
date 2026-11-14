@@ -14,7 +14,7 @@ import radiomap as rmap
 import sensing
 import settings as cfg
 import phone_filter
-from display import Crowd, PointSmoother
+from display import PointSmoother
 
 STALE_S = 3.0
 LOST_S = 60.0
@@ -60,7 +60,6 @@ MEDIAN_MIN_PKTS = 6
 CSI_MOVE_RATIO = 1.8
 # Weight of the device-free log-likelihood added to a phone's; only used with exactly one phone present.
 FUSE_W = 0.5
-BODY_MAC = "body"
 # Per-phone motion reports kept so the walk between two "I'm here" marks can be cut out (App._finish_mark).
 MOTION_LOG_S = 120.0
 
@@ -151,11 +150,8 @@ class Phone:
 
 
 class Tracker:
-    def __init__(self, get_ctx: Callable[[], dict], boards: List[dict], hidden=()):
+    def __init__(self, get_ctx: Callable[[], dict], boards: List[dict]):
         self.get_ctx = get_ctx
-        # Crowd-button boards: never shown as a receiver, station, phone or in events.
-        self.hidden = {str(m).lower() for m in hidden}
-        self.crowd = Crowd()
         self.labels = {str(b.get("base_mac", "")).lower(): b.get("label", "") for b in boards}
         self.nodes: Dict[str, Node] = {}
         self.stations: Dict[str, dict] = {}
@@ -192,8 +188,8 @@ class Tracker:
         return {n.ifm: n.id for n in self.nodes.values() if n.ifm}
 
     def excluded(self) -> set:
-        """Never tracked as phones: boards (id and on-air MAC), the laptop (by its IP) and hidden MACs."""
-        out = set(self.hidden)
+        """Never tracked as phones: boards (id and on-air MAC) and the laptop (by its IP)."""
+        out = set()
         for node in self.nodes.values():
             out.add(node.id)
             if node.ifm:
@@ -201,17 +197,6 @@ class Tracker:
         if self.laptop_ip:
             out.update(m for m, s in self.stations.items() if s.get("ip") == self.laptop_ip)
         return out
-
-    def _crowd(self, pkt: dict):
-        mac = str(pkt.get("id", "")).lower()
-        if mac and mac not in self.hidden:
-            self.hidden.add(mac)
-            self.stations.pop(mac, None)
-            self.phones.pop(mac, None)
-            tag = fmt_mac(mac)
-            self.events = deque((e for e in self.events if tag not in e[1]), maxlen=self.events.maxlen)
-        if pkt.get("on") in (0, 1):
-            self.crowd.set(bool(pkt["on"]))
 
     def _link(self, tx: str, rx: str, rssi: float, frames: int):
         """links[(tx, rx)] = [slow baseline dBm, frames seen, fast level dBm]."""
@@ -255,9 +240,6 @@ class Tracker:
             self.bad_packets += 1
             return
         kind = pkt.get("t")
-        if kind == "crowd":
-            self._crowd(pkt)
-            return
         node = self.nodes.get(nid)
         if node is None:
             node = self.nodes[nid] = Node(nid)
@@ -281,8 +263,7 @@ class Tracker:
         elif kind == "sta":
             self._stations(pkt, rt)
         elif kind == "ev":
-            if str(pkt.get("m", "")).lower() not in self.hidden:
-                self._event(rt, f"{pkt.get('e')} {fmt_mac(pkt.get('m', '000000000000'))} reason={pkt.get('reason')}")
+            self._event(rt, f"{pkt.get('e')} {fmt_mac(pkt.get('m', '000000000000'))} reason={pkt.get('reason')}")
         node.prune(rt)
 
     def _telemetry(self, node: Node, pkt: dict, rt: float):
@@ -303,7 +284,7 @@ class Tracker:
         current = {}
         for entry in pkt.get("sta") or []:
             mac = str(entry.get("m", "")).lower()
-            if mac and mac not in self.hidden:
+            if mac:
                 current[mac] = {"ip": entry.get("ip"), "r": entry.get("r"), "nm": entry.get("nm", ""), "t": rt}
         for mac in current:
             if mac not in self.stations:
@@ -588,17 +569,11 @@ class Tracker:
             if not self._phone_tick(mac, self.phones[mac], t, ctx, st, m, fuse):
                 del self.phones[mac]
         self._capture_tick(t)
-        layout = ctx.get("layout") or {}
-        self.crowd.step(t, layout.get("polygon"), ctx.get("objects") or [])
 
     def _trail(self, ph: Phone, m, t: float):
         kind = ph.status.value
         ph.recent = []
-        last = ph.last_trail_t
-        for ts, x, y, unc in ph.track.smoothed(m):
-            if ts - last < TRAIL_STEP_S:
-                continue
-            last = ts
+        for ts, x, y, unc in ph.track.smoothed(m, ph.last_trail_t, TRAIL_STEP_S):
             point = [round(ts, 2), round(x, 3), round(y, 3), round(unc, 3), kind]
             if ts <= t - phone_filter.SMOOTH_LAG_S + 0.3:
                 ph.trail.append(point)
@@ -708,7 +683,6 @@ class Tracker:
             "dropped_unassoc": self.dropped_unassoc, "laptop_ip": self.laptop_ip,
             "events": list(self.events)[-25:], "packets": self.packets, "bad_packets": self.bad_packets,
             "body": dict(self.body, trail=list(self.body_trail)) if self.body else None,
-            "crowd": self.crowd.snapshot(),
         }
         cap = self.capture
         if cap:

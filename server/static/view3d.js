@@ -11,7 +11,6 @@ const BG = 0x090b16;
 const GREY = 0x7a819c;
 const FURNITURE = { Bed: 0x7d6bb0, Desk: 0x8c6c4a, Chair: 0x50698a, Bookshelf: 0x7c5c3a, Dresser: 0x6c5242, Sofa: 0x5c6c94 };
 const STATUS = { online: 0x8fdcb2, stale: 0xe6b24c, offline: 0xee6a73 };
-const DECOY = 0xff6a4a;   // Nick: simulated decoy phones ("multiple fake addresses") -- display-only, never real
 
 function labelSprite(text, { size = 0.16, color = "#e7eaf6", bg = "rgba(12,15,28,0.78)" } = {}) {
   const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), px = 48;
@@ -45,14 +44,6 @@ class RoomView {
     r.shadowMap.type = THREE.PCFShadowMap;
     el.appendChild(r.domElement);
 
-    // Nick: honesty banner shown whenever simulated decoys are on screen.
-    if (el.style) el.style.position = el.style.position || "relative";
-    this.simBanner = document.createElement("div");
-    this.simBanner.style.cssText = "position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:5;" +
-      "background:rgba(240,168,59,0.92);color:#201400;font:600 13px system-ui,sans-serif;padding:6px 12px;" +
-      "border-radius:8px;display:none;pointer-events:none;white-space:nowrap";
-    el.appendChild(this.simBanner);
-
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(BG);
     this.scene.fog = new THREE.Fog(BG, 12, 30);
@@ -71,10 +62,8 @@ class RoomView {
     this.roomG = new THREE.Group();
     this.boardsG = new THREE.Group();
     this.peopleG = new THREE.Group();
-    this.decoysG = new THREE.Group();   // Nick: simulated decoy phones
-    this.scene.add(this.roomG, this.boardsG, this.peopleG, this.decoysG);
+    this.scene.add(this.roomG, this.boardsG, this.peopleG);
     this.people = new Map();
-    this.decoys = new Map();
     this.boards = new Map();
     this.roomSig = "";
     this.visible = false;
@@ -276,38 +265,6 @@ class RoomView {
     return g;
   }
 
-  // Nick: a simulated decoy phone, drawn to LOOK like a tracked phone (same orb + uncertainty disc) so the real
-  // person blends into the crowd. Honesty is kept by the on-screen "SIMULATED crowd" banner and the sim flag in data.
-  makeDecoy(color) {
-    const g = new THREE.Group();
-    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.075, 24, 16),
-      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.9, roughness: 0.3 }));
-    orb.position.y = PERSON_H;
-    const glow = new THREE.Mesh(new THREE.SphereGeometry(0.16, 24, 16),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false }));
-    glow.position.y = PERSON_H;
-    const post = vline(0.01, PERSON_H, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5 }));
-    const disc = flatDisc(new THREE.CircleGeometry(1, 48),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }));
-    disc.position.y = 0.012;
-    const ring = flatDisc(new THREE.RingGeometry(0.97, 1, 64),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
-    ring.position.y = 0.013;
-    g.add(orb, glow, post, disc, ring);
-    g.userData = { orb, glow, post, disc, ring, pos: null, target: new THREE.Vector3(), unc: 0.5, targetUnc: 0.5 };
-    return g;
-  }
-
-  _simBanner(n) {
-    if (!this.simBanner) return;
-    if (n > 0) {
-      this.simBanner.textContent = `⚠ SIMULATED crowd active — ${n} decoy phones (demo, not real devices)`;
-      this.simBanner.style.display = "block";
-    } else {
-      this.simBanner.style.display = "none";
-    }
-  }
-
   update(S, colorFor, nameOf) {
     const boardsSeen = new Set();
     for (const [id, p] of Object.entries(S.layout.receivers || {})) {
@@ -365,25 +322,6 @@ class RoomView {
       }
     }
     for (const [mac, g] of this.people) if (!peopleSeen.has(mac)) { this.peopleG.remove(g, g.userData.trail); this.people.delete(mac); }
-
-    // Nick: simulated decoys (empty array when the crowd is off, so they all disappear on toggle-off). Drawn like
-    // tracked phones, in the same colour palette, so the real person is hard to pick out of the crowd.
-    const decoysSeen = new Set();
-    for (const d of S.decoys || []) {
-      decoysSeen.add(d.mac);
-      let g = this.decoys.get(d.mac);
-      if (!g) {
-        g = this.makeDecoy(new THREE.Color(colorFor(d.mac)));
-        const tag = labelSprite("Phone " + d.mac.slice(-5), { size: 0.15 });
-        tag.position.y = PERSON_H + 0.28;
-        g.add(tag); g.userData.tag = tag;
-        this.decoysG.add(g); this.decoys.set(d.mac, g);
-      }
-      g.userData.target.set(d.x, 0, d.y);
-      if (!g.userData.pos) { g.userData.pos = new THREE.Vector3(d.x, 0, d.y); g.position.copy(g.userData.pos); }
-    }
-    for (const [mac, g] of this.decoys) if (!decoysSeen.has(mac)) { this.decoysG.remove(g); this.decoys.delete(mac); }
-    this._simBanner((S.decoys || []).length);
   }
 
   frame() {
@@ -400,14 +338,6 @@ class RoomView {
       u.orb.position.y = u.glow.position.y = PERSON_H + (u.stale ? 0 : 0.02 * Math.sin(t * 2));
     }
     for (const b of this.boards.values()) b.userData.halo.scale.setScalar(1 + 0.15 * Math.sin(t * 2.2));
-    for (const g of this.decoys.values()) {   // Nick: decoys glide + breathe exactly like tracked phones
-      const u = g.userData;
-      if (u.pos) { u.pos.lerp(u.target, 0.12); u.unc += (u.targetUnc - u.unc) * 0.12; g.position.copy(u.pos); }
-      const r = Math.max(0.12, u.unc);
-      u.disc.scale.setScalar(r); u.ring.scale.setScalar(r);
-      u.glow.scale.setScalar(1 + 0.12 * Math.sin(t * 3));
-      u.orb.position.y = u.glow.position.y = PERSON_H + 0.02 * Math.sin(t * 2);
-    }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }

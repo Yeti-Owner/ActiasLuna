@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "server"))
 
-from crowd import Crowd, CrowdState, DECOY_PREFIX  # noqa: E402
+from crowd import Crowd, CrowdState  # noqa: E402
 
 ROOM = (6.0, 4.5)
 
@@ -44,12 +44,21 @@ class CrowdTest(unittest.TestCase):
         self.c.toggle()
         self.assertEqual(self.c.state, CrowdState.OFF)
 
-    def test_decoys_are_flagged_and_fake(self):
+    def test_decoys_are_flagged_with_private_macs(self):
         self.c.set(True)
         self.c.tick(0.0, ROOM)
         for dec in self.c.snapshot():
             self.assertTrue(dec["sim"])
-            self.assertTrue(dec["mac"].startswith(DECOY_PREFIX))
+            self.assertEqual(len(dec["mac"]), 12)
+            self.assertEqual(int(dec["mac"][:2], 16) & 0x03, 0x02)   # locally administered, unicast
+
+    def test_decoys_get_trails_and_uncertainty(self):
+        self.c.set(True)
+        for i in range(41):           # 10 s
+            self.c.tick(i * 0.25, ROOM)
+        for dec in self.c.snapshot():
+            self.assertEqual(len(dec["trail"]), 21)                  # one point per 0.5 s
+            self.assertTrue(0.2 <= dec["unc"] <= 0.65)
 
     def test_decoys_stay_in_room(self):
         self.c.set(True)

@@ -33,9 +33,9 @@ import sensing  # noqa: E402
 import settings as cfg  # noqa: E402
 import walkcal  # noqa: E402
 from replay import TICK_S, Replay, load_session  # noqa: E402
-from tracker import Tracker, capture_phase  # noqa: E402
-from crowd import Crowd  # noqa: E402  Nick: honest, display-only decoy crowd (never transmits)
+from crowd import Crowd  # noqa: E402
 from room import Room  # noqa: E402
+from tracker import Status, Tracker, capture_phase  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get("LUNA_DATA", ROOT / "data"))
@@ -163,14 +163,11 @@ class App:
         self.map_links = {}
         self.evaluation = None
         self._eval_gen = 0
-        # MACs of crowd-button boards, hidden from the moment the server starts.
-        self.crowd_macs = read_json(ROOT / "config" / "crowd.json", {}).get("macs", [])
-        self.live = Tracker(self.ctx, self.boards, self.crowd_macs)
+        self.live = Tracker(self.ctx, self.boards)
         self.live.on_capture_done = self._capture_done
-        # Nick: simulated decoy crowd for the "multiple fake addresses" demo. Display-only -- it never transmits and
-        # never touches the Wi-Fi estimate; it just adds clearly-labelled sim markers to the 3D view, toggled by the
-        # Uno Q button. See server/crowd.py.
+        # Display-only decoy phones for the 3D view, toggled by the Uno Q button or /api/crowd (crowd.py).
         self.decoys = Crowd()
+        self.decoy_room = None
         self._decoy_origin = (0.0, 0.0)
         self.rec_file = None
         self.rec_path = None
@@ -638,7 +635,7 @@ class App:
         header, lines = load_session(path)
         if not lines:
             raise ValueError("session has no packets")
-        self.replay = Replay(fname, header, lines, self.lock, self.ctx, self.boards, speed, start, self.crowd_macs)
+        self.replay = Replay(fname, header, lines, self.lock, self.ctx, self.boards, speed, start)
         self.replay.start()
 
     def stop_replay(self):
@@ -671,6 +668,9 @@ class App:
                     self.live.bad_packets += 1
                 continue
             with self.lock:
+                # A crowd button sending to the board port drives the decoys; it is not a board.
+                if isinstance(pkt, dict) and self.decoys.handle_packet(pkt):
+                    continue
                 self.known_nodes.add(src[0])
                 self.live.ingest(pkt, rt, src)
                 self.record(rt, src, pkt)
@@ -752,50 +752,27 @@ class App:
             elif delay > 0:
                 time.sleep(delay)
 
-    # ---- Nick: decoy crowd (display-only) --------------------------------------------------------------------
-    def _layout_bounds(self):
-        """Bounding box (x0, y0, x1, y1) of the room outline, in the same metre frame as the ESP32 markers."""
-        poly = (self.layout or {}).get("polygon") or []
-        pts = [p for p in poly if isinstance(p, (list, tuple)) and len(p) >= 2]
-        if len(pts) < 3:
-            return None
-        xs, ys = [float(p[0]) for p in pts], [float(p[1]) for p in pts]
-        return min(xs), min(ys), max(xs), max(ys)
-
     def _tracked_center(self):
-        """The live position of the real person the crowd should hide (layout frame), or None if nobody is tracked.
-        Prefers a tracked phone's estimate; falls back to the phone-free 'body' estimate."""
-        live = self.live
-        for ph in getattr(live, "phones", {}).values():
-            est = getattr(ph, "est", None)
-            if isinstance(est, dict) and est.get("x") is not None and est.get("kind") != "stale":
-                return float(est["x"]), float(est["y"])
-        body = getattr(live, "body", None)
-        if isinstance(body, dict) and body.get("x") is not None:
-            return float(body["x"]), float(body["y"])
-        return None
+        """Where the real person is (layout frame): a live phone's estimate, else the phone-free body, else None."""
+        for ph in self.live.phones.values():
+            if ph.est and ph.est["kind"] != Status.STALE.value:
+                return ph.est["x"], ph.est["y"]
+        body = self.live.body
+        return (body["x"], body["y"]) if body else None
 
     def _tick_decoys(self, now):
-        """Advance the decoys inside the real room footprint, gathered around the tracked person so they hide them.
-        Called under self.lock from tick_loop."""
-        b = self._layout_bounds()
-        if not b:
-            self.decoys.set(False)
-            self.decoys.tick(now, (1.0, 1.0))
-            return
-        x0, y0, x1, y1 = b
+        """Advance the decoys inside the room, gathered around the tracked person. Under self.lock (tick_loop)."""
+        x0, y0, x1, y1 = _bbox(self.layout["polygon"])
         self._decoy_origin = (x0, y0)
-        center = None
         c = self._tracked_center()
-        if c is not None:
-            center = (c[0] - x0, c[1] - y0)     # into the crowd's 0..w / 0..d frame
-        room = getattr(self, "decoy_room", None) or (max(x1 - x0, 0.5), max(y1 - y0, 0.5))
-        self.decoys.tick(now, room, center=center)
+        center = None if c is None else (c[0] - x0, c[1] - y0)   # the crowd works in a 0..w / 0..d frame
+        self.decoys.tick(now, self.decoy_room or (max(x1 - x0, 0.5), max(y1 - y0, 0.5)), center=center)
 
     def _decoy_snapshot(self):
-        """Decoys in the layout metre frame (offset into the room), each flagged sim for the UI to label."""
+        """Decoys moved from the crowd's frame into the layout frame (app.js mergeDecoys shows them as phones)."""
         ox, oy = self._decoy_origin
-        return [{"mac": d["mac"], "x": round(d["x"] + ox, 2), "y": round(d["y"] + oy, 2), "sim": True}
+        return [dict(d, x=round(d["x"] + ox, 2), y=round(d["y"] + oy, 2),
+                     trail=[[p[0], round(p[1] + ox, 3), round(p[2] + oy, 3)] for p in d["trail"]])
                 for d in self.decoys.snapshot()]
 
     def set_decoys(self, on):
@@ -809,7 +786,7 @@ class App:
             return self.decoys.state.value == "on"
 
     def decoy_udp_loop(self):
-        """The Uno Q white button (tools/unoq_button_adb.py) sends {"t":"crowd","on":0|1} here to flip the decoys."""
+        """The Uno Q white button (tools/unoq_button_adb.py) sends crowd packets here (crowd.Crowd.handle_packet)."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -843,7 +820,7 @@ class App:
                      "settings": self.settings, "settings_info": cfg.INFO,
                      "settings_defaults": cfg.DEFAULTS, "lab": self.lab,
                      "furniture_prior": bool(self.blocked), "ssid": self.net.get("ssid"), "wall": time.time()}
-            extra["decoys"] = self._decoy_snapshot()   # Nick: simulated decoys for the 3D view (empty when off)
+            extra["decoys"] = self._decoy_snapshot()
             replay = self.replay
             if replay:
                 extra["replay"] = replay.info()
@@ -997,7 +974,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(read_json(DATA / "scan" / "room.json", None))
         if path == "/api/state":
             return self._json(APP.snapshot(view))
-        if path == "/api/crowd":          # Nick: toggle the simulated decoys (web button / testing without hardware)
+        if path == "/api/crowd":   # toggles the decoys; ?on=1 / ?on=0 sets them
             on = self._query(url).get("on")
             state = APP.toggle_decoys() if on is None else APP.set_decoys(on in ("1", "true", "on"))
             return self._json({"on": state})
@@ -1302,7 +1279,7 @@ def main():
     parser.add_argument("--port", type=int, default=int(net.get("dashboard_port", 8080)))
     parser.add_argument("--udp-port", type=int, default=int(net.get("server_udp_port", 5007)))
     parser.add_argument("--decoy-udp-port", type=int, default=int(net.get("decoy_udp_port", 5005)),
-                        help="Nick: UDP port the Uno Q white button toggles the simulated decoys on (0 = off)")
+                        help="UDP port the Uno Q white button toggles the simulated decoys on (0 = off)")
     parser.add_argument("--targets", default="", help="board addresses host:port,... (simulator)")
     parser.add_argument("--no-record", action="store_true")
     parser.add_argument("--phone-port", type=int, default=int(net.get("phone_port", 8081)),
@@ -1326,7 +1303,7 @@ def main():
         APP.set_recording(True)
     loops = [APP.udp_loop, APP.subscribe_loop, APP.tick_loop]
     if args.decoy_udp_port:
-        loops.append(APP.decoy_udp_loop)   # Nick: listen for the Uno Q white button
+        loops.append(APP.decoy_udp_loop)
     for loop in loops:
         threading.Thread(target=loop, daemon=True).start()
     rec = APP.rec_path.name if APP.rec_file else "off"
