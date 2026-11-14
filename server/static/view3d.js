@@ -11,6 +11,7 @@ const BG = 0x090b16;
 const GREY = 0x7a819c;
 const FURNITURE = { Bed: 0x7d6bb0, Desk: 0x8c6c4a, Chair: 0x50698a, Bookshelf: 0x7c5c3a, Dresser: 0x6c5242, Sofa: 0x5c6c94 };
 const STATUS = { online: 0x8fdcb2, stale: 0xe6b24c, offline: 0xee6a73 };
+const DECOY = 0xff6a4a;   // Nick: simulated decoy phones ("multiple fake addresses") -- display-only, never real
 
 function labelSprite(text, { size = 0.16, color = "#e7eaf6", bg = "rgba(12,15,28,0.78)" } = {}) {
   const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), px = 48;
@@ -62,8 +63,10 @@ class RoomView {
     this.roomG = new THREE.Group();
     this.boardsG = new THREE.Group();
     this.peopleG = new THREE.Group();
-    this.scene.add(this.roomG, this.boardsG, this.peopleG);
+    this.decoysG = new THREE.Group();   // Nick: simulated decoy phones
+    this.scene.add(this.roomG, this.boardsG, this.peopleG, this.decoysG);
     this.people = new Map();
+    this.decoys = new Map();
     this.boards = new Map();
     this.roomSig = "";
     this.visible = false;
@@ -226,6 +229,25 @@ class RoomView {
     return g;
   }
 
+  // Nick: a simulated decoy phone. Distinct warm colour + a small "sim" ring, so it reads as fake, not a real track.
+  makeDecoy() {
+    const color = new THREE.Color(DECOY), h = 3.0 * FT, g = new THREE.Group();
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.055, 20, 14),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.8, roughness: 0.35 }));
+    orb.position.y = h;
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(0.12, 20, 14),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.14, depthWrite: false }));
+    glow.position.y = h;
+    const post = vline(0.01, h, new THREE.LineDashedMaterial({ color, dashSize: 0.05, gapSize: 0.04, transparent: true, opacity: 0.6 }));
+    post.computeLineDistances();
+    const ring = flatDisc(new THREE.RingGeometry(0.1, 0.12, 32),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }));
+    ring.position.y = 0.012;
+    g.add(orb, glow, post, ring);
+    g.userData = { glow, pos: null, target: new THREE.Vector3() };
+    return g;
+  }
+
   update(S, colorFor, nameOf) {
     const boardsSeen = new Set();
     for (const [id, p] of Object.entries(S.layout.receivers || {})) {
@@ -283,6 +305,17 @@ class RoomView {
       }
     }
     for (const [mac, g] of this.people) if (!peopleSeen.has(mac)) { this.peopleG.remove(g, g.userData.trail); this.people.delete(mac); }
+
+    // Nick: simulated decoys (empty array when the crowd is off, so they all disappear on toggle-off).
+    const decoysSeen = new Set();
+    for (const d of S.decoys || []) {
+      decoysSeen.add(d.mac);
+      let g = this.decoys.get(d.mac);
+      if (!g) { g = this.makeDecoy(); this.decoysG.add(g); this.decoys.set(d.mac, g); }
+      g.userData.target.set(d.x, 0, d.y);
+      if (!g.userData.pos) { g.userData.pos = new THREE.Vector3(d.x, 0, d.y); g.position.copy(g.userData.pos); }
+    }
+    for (const [mac, g] of this.decoys) if (!decoysSeen.has(mac)) { this.decoysG.remove(g); this.decoys.delete(mac); }
   }
 
   frame() {
@@ -299,6 +332,11 @@ class RoomView {
       u.orb.position.y = u.glow.position.y = PERSON_H + (u.stale ? 0 : 0.02 * Math.sin(t * 2));
     }
     for (const b of this.boards.values()) b.userData.halo.scale.setScalar(1 + 0.15 * Math.sin(t * 2.2));
+    for (const g of this.decoys.values()) {   // Nick: glide decoys to their new spot + a gentle pulse
+      const u = g.userData;
+      if (u.pos) { u.pos.lerp(u.target, 0.14); g.position.copy(u.pos); }
+      u.glow.scale.setScalar(1 + 0.18 * Math.sin(t * 3.5));
+    }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }
