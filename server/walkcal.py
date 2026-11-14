@@ -16,6 +16,10 @@ whenever the spots produced from the same capture change: luna_server rebuilds s
 Guided walks are the secondary method; "I'm here" marks (luna_server.App._finish_mark) are the primary one. The walk
 between two marks (a leg) is treated as a two-tap walk: leg_spots turns its readings into map spots the same way, and
 leg_fit / motion_fit learn the compass offset and stride from it.
+
+Traced walks (phone.js trace mode) need none of that guessing: the holder's finger gives the position all along.
+raw_traces cuts the finger points into strokes and stores each with its readings under "traces"; trace_spots turns
+one into WALK_WIN_S spots shaped like walk spots, so the map, leave-one-out and the lab treat them alike.
 """
 from __future__ import annotations
 
@@ -25,7 +29,7 @@ from typing import List, Optional
 import radiomap as rmap
 import sensing
 
-VERSION = 3
+VERSION = 4
 STEP_S = 0.25
 WALK_WIN_S = 1.0
 MIN_DWELL_S = 1.0
@@ -47,6 +51,11 @@ TAP_AFTER_S = 1.0
 STRIDE_MIN_M = 0.1
 STRIDE_MAX_M = 1.1
 # Free legs between "I'm here" marks (leg_fit, motion_fit).
+# Traces: a lift longer than TRACE_GAP_S ends a stroke; strokes under TRACE_MIN_S are dropped. A window whose finger
+# moved under TRACE_STILL_M counts as standing.
+TRACE_GAP_S = 1.5
+TRACE_MIN_S = 3.0
+TRACE_STILL_M = 0.15
 LEG_MIN_M = 0.6
 LEG_MAX_S = 60.0
 LEG_MIN_READINGS = 4
@@ -203,7 +212,11 @@ def walk_spots(capture: dict, walk_id: str) -> List[dict]:
             "eval_s": round(min(t1 - t0, DWELL_EVAL_S if still else WALK_WIN_S), 3),
         })
 
-    # Adjacent moving windows sit a step apart and share their error, so up to BLOCK_WINDOWS are held out together.
+    return _block_runs(spots)
+
+
+def _block_runs(spots: List[dict]) -> List[dict]:
+    """Adjacent moving windows sit a step apart and share their error, so up to BLOCK_WINDOWS are held out together."""
     block, prev, members = None, None, 0
     for spot in spots:
         if not spot["still"]:
@@ -324,6 +337,51 @@ def motion_fit(walks: List[dict], legs: List[dict]):
             heading[mac] = [round(math.atan2(s, c), 4), round(agree, 3)]
     stride = _stride(stride_legs) if stride_legs else None
     return heading, (round(stride, 3) if stride else None)
+
+
+def raw_traces(points: List[list], samples: List[list], phone: str) -> List[dict]:
+    """Finger points [t, x, y] and this phone's readings [t, board, frames, rssi, sd] (absolute times) as stored
+    traces, one per stroke. The id comes from the phone and start time, so importing the same points twice is a no-op."""
+    strokes: List[List[list]] = []
+    for p in sorted(points):
+        if strokes and p[0] - strokes[-1][-1][0] <= TRACE_GAP_S:
+            strokes[-1].append(p)
+        else:
+            strokes.append([p])
+    out = []
+    for pts in strokes:
+        t0, t1 = pts[0][0], pts[-1][0]
+        if t1 - t0 < TRACE_MIN_S:
+            continue
+        out.append({"id": f"trace:{phone}:{t0:.2f}", "phone": phone, "t0": t0,
+                    "pts": [[round(p[0] - t0, 3), round(p[1], 3), round(p[2], 3)] for p in pts],
+                    "samples": [[round(s[0] - t0, 3)] + list(s[1:5]) for s in samples if t0 <= s[0] <= t1]})
+    return out
+
+
+def trace_spots(trace: dict) -> List[dict]:
+    pts, samples = trace["pts"], sorted(trace["samples"])
+    spots: List[dict] = []
+    t = pts[0][0]
+    while t + WALK_WIN_S <= pts[-1][0] + 1e-6:
+        t1 = t + WALK_WIN_S
+        seg = [p for p in pts if t <= p[0] < t1]
+        window = [s for s in samples if t <= s[0] < t1]
+        per = rmap.per_node(window, rmap.MIN_FRAMES)
+        if len(seg) >= 2 and len(per) >= 2:
+            path = sum(math.hypot(b[1] - a[1], b[2] - a[2]) for a, b in zip(seg, seg[1:]))
+            still = path < TRACE_STILL_M
+            dx, dy = seg[-1][1] - seg[0][1], seg[-1][2] - seg[0][2]
+            spots.append({
+                "kind": "walk", "phone": trace["phone"], "x": round(sum(p[1] for p in seg) / len(seg), 3),
+                "y": round(sum(p[2] for p in seg) / len(seg), 3), "orientation": "hand",
+                "duration": WALK_WIN_S, "per_node": per, "warnings": [],
+                "samples": [[round(s[0] - t, 3)] + list(s[1:]) for s in window],
+                "t": trace["t0"] + t, "facing": None if still else round(math.atan2(dy, dx), 3),
+                "group": trace["id"], "block": f"{trace['id']}:{len(spots)}", "still": still, "eval_s": WALK_WIN_S,
+            })
+        t = t1
+    return _block_runs(spots)
 
 
 def raw_walk(capture: dict, walk_id: str) -> dict:

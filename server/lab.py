@@ -36,6 +36,9 @@ def truths(calib: dict) -> List[dict]:
         if pts:
             groups[walk["id"]] = {"kind": "walk", "group": walk["id"], "phone": walk.get("phone"), "pts": pts,
                                   "gap": 0.6}
+    for trace in calib.get("traces", []):
+        groups[trace["id"]] = {"kind": "walk", "group": trace["id"], "phone": trace["phone"], "gap": walkcal.TRACE_GAP_S,
+                               "pts": [(trace["t0"] + p[0], p[1], p[2]) for p in trace["pts"]]}
     for spot in calib.get("spots", []):
         if spot.get("kind") != "walk" or "t" not in spot or "gap" in groups.get(spot["group"], {}):
             continue

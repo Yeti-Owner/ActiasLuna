@@ -21,6 +21,7 @@ import traceback
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Dict, List
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -33,7 +34,7 @@ import radiomap as rmap  # noqa: E402
 import sensing  # noqa: E402
 import settings as cfg  # noqa: E402
 import walkcal  # noqa: E402
-from recording import TICK_S  # noqa: E402
+from recording import TICK_S, feed, load_session  # noqa: E402
 from crowd import Crowd, jam_offset  # noqa: E402
 from room import Room  # noqa: E402
 from tracker import Status, Tracker, capture_phase, fmt_mac  # noqa: E402
@@ -194,6 +195,8 @@ class App:
         self.last_mark = {}
         # mac -> outcome of that phone's latest mark, shown on its page (phone_state "result").
         self.mark_results = {}
+        # mac -> time of the last finger point saved as calibration (save_phone_traces takes only newer strokes).
+        self.trace_saved = {}
         self._rebuild()
 
     @staticmethod
@@ -222,17 +225,21 @@ class App:
         calib.setdefault("walks", [])
         # Walks between consecutive "I'm here" marks: map spots (walkcal.leg_spots), compass and stride.
         calib.setdefault("legs", [])
-        if calib.get("walkcal_v") != walkcal.VERSION and (calib["walks"] or calib["legs"]):
+        # Traced walks (finger on the phone map): map spots (walkcal.trace_spots) and lab truth.
+        calib.setdefault("traces", [])
+        if calib.get("walkcal_v") != walkcal.VERSION and (calib["walks"] or calib["legs"] or calib["traces"]):
             self._derive_walks(calib)
         return calib
 
     @staticmethod
     def _derive_walks(calib: dict):
-        ids = {w["id"] for w in calib["walks"]}
+        ids = {w["id"] for w in calib["walks"] + calib["traces"]}
         calib["spots"] = [s for s in calib["spots"]
                           if s.get("group") not in ids and not str(s.get("group", "")).startswith("leg:")]
         for walk in calib["walks"]:
             calib["spots"].extend(walkcal.walk_spots(walk, walk["id"]))
+        for trace in calib["traces"]:
+            calib["spots"].extend(walkcal.trace_spots(trace))
         for leg in calib["legs"]:
             calib["spots"].extend(walkcal.leg_spots(leg))
         App._refit_motion(calib)
@@ -575,11 +582,75 @@ class App:
         self.mark_results[phone] = dict(last, ok=False, undone=True, why="undone")
         self._note(f"mark at ({last['x'] / FT:.1f}, {last['y'] / FT:.1f}) ft undone")
 
+    def add_traces(self, traces: List[dict]) -> int:
+        """Stored traces join the calibration (new ids only). Returns how many map spots they added."""
+        known = {t["id"] for t in self.calib["traces"]}
+        added = 0
+        for trace in traces:
+            spots = walkcal.trace_spots(trace) if trace["id"] not in known else []
+            if spots:
+                self.calib["traces"].append(trace)
+                self.calib["spots"].extend(spots)
+                added += len(spots)
+        if added:
+            self._save_calib()
+            self._rebuild()
+            self._note(f"traced walks added {added} calibration spots")
+        return added
+
+    def save_phone_traces(self, mac: str) -> int:
+        """phone.js "Save as calibration": this phone's finger strokes since its last save, with the readings still
+        held (tracker.SAMPLE_KEEP_S)."""
+        ph = self.live.phones.get(mac)
+        since = self.trace_saved.get(mac, -math.inf)
+        points = [list(p) for p in ph.trace if p[0] > since] if ph else []
+        if not points:
+            return 0
+        self.trace_saved[mac] = points[-1][0]
+        return self.add_traces(walkcal.raw_traces(points, [list(s[:5]) for s in ph.samples], mac))
+
+    def import_traces(self, fname: str):
+        """Traced walks in a saved recording become calibration. Re-running the recording is slow, so a worker does
+        it and the outcome shows as an event."""
+        path = DATA / "sessions" / fname
+        require(SAFE_NAME.match(fname) and path.exists(), "no such session")
+        layout, ctx = self.layout, self.ctx
+
+        def worker():
+            _, lines = load_session(path)
+            points: Dict[str, list] = {}
+            for line in lines:
+                if "trace" in line:
+                    tc = line["trace"]
+                    points.setdefault(tc["m"], []).append([line["rt"], tc["x"], tc["y"]])
+            if not points:
+                with self.lock:
+                    self._note(f"{fname}: no traced walks in it")
+                return
+            empty = rmap.RadioMap(layout, [])
+            tk = Tracker(lambda: dict(ctx(), map=empty), self.boards)
+            samples: Dict[str, dict] = {m: {} for m in points}
+
+            def grab(t):
+                for mac, rows in samples.items():
+                    ph = tk.phones.get(mac)
+                    for s in ph.samples if ph else ():
+                        rows[(s[0], s[1])] = list(s[:5])
+            feed(tk, lines, lines[0]["rt"], lines[-1]["rt"], grab)
+            traces = [tr for mac, pts in points.items()
+                      for tr in walkcal.raw_traces(pts, sorted(samples[mac].values()), mac)]
+            with self.lock:
+                if not self.add_traces(traces):
+                    self._note(f"{fname}: its traced walks are already in the calibration (or too short)")
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def clear_calib(self):
         # The empty-room baseline describes the room, not the walks, so it survives.
         self.last_mark.clear()
         self.mark_results.clear()
-        self.calib.update(spots=[], tests=[], df_walk=[], heading={}, walks=[], legs=[])
+        self.calib.update(spots=[], tests=[], df_walk=[], heading={}, walks=[], legs=[], traces=[])
+        self.trace_saved.clear()
         self.calib.pop("stride", None)
         self._save_calib()
         self._rebuild()
@@ -931,7 +1002,8 @@ class App:
         report = self.live.fresh_report(mac)
         now = time.time()
         out["me"] = {"mac": mac, "name": self.live.stations.get(mac, {}).get("nm", ""),
-                     "est": ph.est if ph else None, "motion": report["mv"] if report else None}
+                     "est": ph.est if ph else None, "motion": report["mv"] if report else None,
+                     "trace": self.live.trace_info(ph, self.live.now) if ph else None}
         est = ph.est if ph else None
         out.update(self._plan_state((est["x"], est["y"]) if est else None))
         out["result"] = self.mark_results.get(mac)
@@ -966,9 +1038,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, "application/json", json.dumps(obj).encode())
 
     def _reply(self, result):
-        """Route handlers return None for success or (http status, error message)."""
-        if result is None:
-            return self._json({"ok": True})
+        """Route handlers return None for success, a dict of extra fields for success, or (http status, error)."""
+        if result is None or isinstance(result, dict):
+            return self._json({"ok": True, **(result or {})})
         return self._json({"error": result[1]}, result[0])
 
     def _body(self) -> dict:
@@ -1142,6 +1214,7 @@ def _post_group_delete(a: App, b: dict):
     group = str(b["group"])
     a.calib["spots"] = [s for s in a.calib["spots"] if s.get("group") != group]
     a.calib["walks"] = [w for w in a.calib["walks"] if w.get("id") != group]
+    a.calib["traces"] = [w for w in a.calib["traces"] if w.get("id") != group]
     a._save_calib()
     a._rebuild()
 
@@ -1176,6 +1249,7 @@ DASHBOARD_POST = {
     "/api/settings": lambda a, b: a.set_setting(str(b["key"]), bool(b["on"])),
     "/api/lab/run": lambda a, b: a.start_lab(),
     "/api/session/delete": _post_session_delete,
+    "/api/session/traces": lambda a, b: a.import_traces(str(b["file"])),
 }
 
 
@@ -1278,6 +1352,27 @@ def _phone_motion(a: App, b: dict, mac: str, mine: bool):
     a._write_rec({"rt": round(time.time(), 4), "motion": line})
 
 
+TRACE_MAX_PTS = 50
+TRACE_MAX_AGE_MS = 5000
+# Traced points may leave the room outline by up to this much (doorway, hallway); phone.js and app.js TRACE_MARGIN_M
+# draw the same margin so everything accepted is on screen.
+TRACE_MARGIN_M = 1.0
+
+
+def _phone_trace(a: App, b: dict, mac: str, mine: bool):
+    """phone.js trace mode: [[age_ms, x, y], ...] finger positions since the last post, oldest first."""
+    now = time.time()
+    x0, y0, x1, y1 = _bbox(a.layout["polygon"])
+    for age, x, y in list(b.get("pts") or [])[-TRACE_MAX_PTS:]:
+        age, x, y = finite(age), finite(x), finite(y)
+        if not (0 <= age <= TRACE_MAX_AGE_MS and x0 - TRACE_MARGIN_M <= x <= x1 + TRACE_MARGIN_M
+                and y0 - TRACE_MARGIN_M <= y <= y1 + TRACE_MARGIN_M):
+            continue
+        rt = round(now - age / 1000.0, 4)
+        a.live.trace(mac, x, y, rt)
+        a._write_rec({"rt": rt, "trace": {"m": mac, "x": round(x, 3), "y": round(y, 3)}})
+
+
 # (app, body, phone mac, whether the running capture is this phone's) -> None (ok) or (status, error).
 PHONE_POST = {
     "/api/mark": lambda a, b, mac, mine: a.start_mark(mac, b),
@@ -1286,6 +1381,8 @@ PHONE_POST = {
     "/api/capture": lambda a, b, mac, mine: a.start_spot(b, mac, 12, 3.0),
     "/api/walk/mark": _phone_mark,
     "/api/motion": _phone_motion,
+    "/api/trace": _phone_trace,
+    "/api/trace/save": lambda a, b, mac, mine: {"added": a.save_phone_traces(mac)},
     "/api/empty/start": lambda a, b, mac, mine: a.start_empty(mac),
     "/api/calib/clear": lambda a, b, mac, mine: (409, "a capture is running") if a.live.capture else a.clear_calib(),
     "/api/walk/stop": lambda a, b, mac, mine: a.live.stop_walk() if mine else None,

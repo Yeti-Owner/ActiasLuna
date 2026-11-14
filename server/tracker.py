@@ -6,6 +6,7 @@ time rt, so feeding a recording back is deterministic. Callers hold App.lock.
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from collections import deque
 from enum import Enum
 from typing import Callable, Dict, List, Optional
@@ -61,6 +62,17 @@ CSI_MOVE_RATIO = 1.8
 FUSE_W = 0.5
 # Per-phone motion reports kept so the walk between two "I'm here" marks can be cut out (App._finish_mark).
 MOTION_LOG_S = 120.0
+# Traced truth: the holder keeps a finger on the phone map where they are (phone.js trace mode, POST /api/trace).
+# Kept TRACE_KEEP_S beside the raw fixes and scored against Phone.raw, never the display dot: the live error uses a
+# trace point at most TRACE_NOW_S old; the session figures also try the estimate up to TRACE_LAG_MAX_S later, and the
+# lag that fits best is how far the estimate trails the walker. Recomputed every TRACE_STATS_S.
+TRACE_KEEP_S = 120.0
+TRACE_SEND_S = 60.0
+TRACE_NOW_S = 1.0
+TRACE_LAG_MAX_S = 4.0
+TRACE_LAG_STEP_S = 0.25
+TRACE_MATCH_S = 0.3
+TRACE_STATS_S = 1.0
 
 
 def fmt_mac(mac: str) -> str:
@@ -146,6 +158,10 @@ class Phone:
         self.steps_seen: Optional[int] = None
         self.radio_mv = -1
         self.radio_db = 0.0
+        self.trace: deque = deque()
+        self.raw_hist: deque = deque()
+        self.trace_stats: Optional[dict] = None
+        self.trace_stats_t = -math.inf
 
 
 class Tracker:
@@ -426,6 +442,60 @@ class Tracker:
         ph = self.phones.get(mac)
         return [[round(s[0] - t0, 3), s[1], s[2], s[3], s[4]] for s in (ph.samples if ph else ()) if t0 <= s[0] <= t1]
 
+    def trace(self, mac: str, x: float, y: float, t: float):
+        """Where the holder says they are right now (traced truth, see TRACE_KEEP_S). Recorded, so the lab sees it."""
+        ph = self.phones.get(mac)
+        if ph is None:
+            return
+        if ph.trace and t < ph.trace[-1][0]:
+            return
+        ph.trace.append((t, x, y))
+        while t - ph.trace[0][0] > TRACE_KEEP_S:
+            ph.trace.popleft()
+
+    def trace_info(self, ph: Phone, t: float) -> Optional[dict]:
+        if not ph.trace or t - ph.trace[-1][0] > TRACE_KEEP_S:
+            return None
+        last = ph.trace[-1]
+        now_err = None
+        if ph.raw and t - last[0] <= TRACE_NOW_S:
+            now_err = math.hypot(ph.raw["x"] - last[1], ph.raw["y"] - last[2])
+        if t - ph.trace_stats_t >= TRACE_STATS_S:
+            ph.trace_stats_t = t
+            ph.trace_stats = self._trace_stats(ph)
+        return {"pts": [[round(p[0] - t, 2), round(p[1], 3), round(p[2], 3)] for p in ph.trace
+                        if t - p[0] <= TRACE_SEND_S],
+                "err": None if now_err is None else round(now_err, 3), **(ph.trace_stats or {})}
+
+    @staticmethod
+    def _trace_stats(ph: Phone) -> Optional[dict]:
+        """Median error of Phone.raw against the trace, as is and at the estimate lag that fits best."""
+        hist = list(ph.raw_hist)
+        if len(hist) < 2:
+            return None
+        times = [h[0] for h in hist]
+
+        def raw_at(t):
+            i = bisect_left(times, t)
+            best = min((j for j in (i - 1, i) if 0 <= j < len(hist)), key=lambda j: abs(times[j] - t))
+            return hist[best] if abs(times[best] - t) <= TRACE_MATCH_S else None
+
+        def median_err(lag):
+            errs = []
+            for tt, x, y in ph.trace:
+                h = raw_at(tt + lag)
+                if h:
+                    errs.append(math.hypot(h[1] - x, h[2] - y))
+            return (sorted(errs)[len(errs) // 2], len(errs)) if errs else (None, 0)
+
+        med, n = median_err(0.0)
+        if med is None:
+            return None
+        lags = [k * TRACE_LAG_STEP_S for k in range(int(TRACE_LAG_MAX_S / TRACE_LAG_STEP_S) + 1)]
+        scored = [(median_err(lag)[0], lag) for lag in lags]
+        best_err, best_lag = min((e, lag) for e, lag in scored if e is not None)
+        return {"med": round(med, 3), "n": n, "lag": best_lag, "med_at_lag": round(best_err, 3)}
+
     def anchor(self, mac: str, x: float, y: float, t: float):
         """The holder marked where they stand ("mark_anchor" setting). Recorded, so the lab sees it too."""
         ctx = self.get_ctx()
@@ -551,6 +621,9 @@ class Tracker:
         ph.receivers = len(m.usable(self.window(ph, t - RECEIVERS_S, t)))
         if result:
             ph.raw = result
+            ph.raw_hist.append((t, result["x"], result["y"]))
+            while t - ph.raw_hist[0][0] > TRACE_KEEP_S + TRACE_LAG_MAX_S:
+                ph.raw_hist.popleft()
         if ph.raw is None:
             return True
         full = ph.receivers >= min(3, len(m.nodes))
@@ -674,7 +747,7 @@ class Tracker:
                    for board, a in per.items()}
         return {"mac": mac, "mac_fmt": fmt_mac(mac), "name": station.get("nm", ""), "ip": station.get("ip"),
                 "associated": mac in self.stations, "age": round(t - ph.last, 1) if ph.last else None,
-                "est": ph.est, "per_node": per_out,
+                "est": ph.est, "per_node": per_out, "trace": self.trace_info(ph, t),
                 "trail": [p for p in ph.trail if t - p[0] <= TRAIL_SEND_S] + ph.recent, "spark": spark}
 
     def snapshot(self, extra: Optional[dict] = None) -> dict:

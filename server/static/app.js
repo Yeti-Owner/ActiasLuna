@@ -21,7 +21,8 @@ const colors = {};
 // smoothly between 4 Hz snapshots.
 const shown = {};
 
-try { simple = localStorage.lunaMode !== "debug"; show3d = localStorage.luna3d === "1"; } catch (e) {}
+let snapTrace = true;
+try { simple = localStorage.lunaMode !== "debug"; show3d = localStorage.luna3d === "1"; snapTrace = localStorage.lunaSnap !== "0"; } catch (e) {}
 const remember = (k, v) => { try { localStorage[k] = v; } catch (e) {} };
 
 function colorFor(mac) {
@@ -46,6 +47,7 @@ function connect() {
     S = JSON.parse(ev.data);
     mergeBody(S);
     mergeDecoys(S);
+    snapToTrace(S);
     if (!editing) L = clone(S.layout);
     render();
   };
@@ -88,6 +90,27 @@ function mergeDecoys(s) {
     for (const n of s.nodes) if (d.per_node[n.id]) n.frame_rate = Math.round((n.frame_rate + d.per_node[n.id].rate) * 100) / 100;
   }
 }
+
+// Preview of perfect tracking, display only: while a phone is being traced (finger down within SNAP_FRESH_S), its dot
+// and list entry show the latest traced point instead of the estimate, with no trail. p.snapped hides the overlay.
+const SNAP_FRESH_S = 1.0, SNAP_UNC_M = 0.15, TRACE_MARGIN_M = 1.0;
+function snapToTrace(s) {
+  if (!snapTrace) return;
+  for (const p of s.phones) {
+    const pts = p.trace?.pts;
+    if (!pts?.length || !p.est || pts[pts.length - 1][0] < -SNAP_FRESH_S) continue;
+    const [, x, y] = pts[pts.length - 1];
+    p.est = Object.assign({}, p.est, { x, y, unc: SNAP_UNC_M, kind: "estimated" });
+    p.trail = [];
+    p.snapped = true;
+  }
+}
+function applySnap() {
+  $("snapTog").textContent = snapTrace ? "Snap to trace: on" : "Snap to trace: off";
+  $("snapTog").title = "While a phone is traced, show its dot on the traced line (display only) instead of the estimate";
+}
+$("snapTog").onclick = () => { snapTrace = !snapTrace; remember("lunaSnap", snapTrace ? "1" : "0"); applySnap(); };
+applySnap();
 
 // 3D view: needs WebGL and the bundled three.js; report failures instead of showing a black box.
 function fail3d(msg) {
@@ -320,6 +343,11 @@ function fitView() {
   if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const pts = L.polygon.concat(Object.values(L.receivers).map((p) => [p.x, p.y]));
+  // While any phone has a trace, leave the margin traced points may use outside the room (luna_server.TRACE_MARGIN_M).
+  if (S?.phones.some((p) => p.trace)) {
+    const b = boundsOf(L.polygon);
+    pts.push([b.x0 - TRACE_MARGIN_M, b.y0 - TRACE_MARGIN_M], [b.x1 + TRACE_MARGIN_M, b.y1 + TRACE_MARGIN_M]);
+  }
   const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
   const minX = Math.min(0, ...xs), maxX = Math.max(...xs, 1), minY = Math.min(0, ...ys), maxY = Math.max(...ys, 1);
   const pad = 36, k = Math.max(5, Math.min((r.width - 2 * pad) / (maxX - minX), (r.height - 2 * pad) / (maxY - minY)));
@@ -432,6 +460,28 @@ function drawRings(p) {
   });
 }
 
+// Traced truth from the phone's trace mode (Tracker.trace_info): white line = where the holder said they were, red
+// line = from there to the raw estimate, labelled with the live and typical error and the estimate's lag.
+function drawTrace(p) {
+  const tr = p.trace;
+  if (!tr || !tr.pts.length || p.snapped) return;
+  ctx.strokeStyle = "#ffffffaa"; ctx.lineWidth = 2.5; ctx.lineJoin = "round";
+  ctx.beginPath();
+  tr.pts.forEach(([, x, y], i) => (i ? ctx.lineTo(toX(x), toY(y)) : ctx.moveTo(toX(x), toY(y))));
+  ctx.stroke();
+  const [, tx, ty] = tr.pts[tr.pts.length - 1], X = toX(tx), Y = toY(ty);
+  ctx.beginPath(); ctx.arc(X, Y, 6, 0, 2 * Math.PI); ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.stroke();
+  const raw = p.est?.raw;
+  if (tr.err != null && raw) {
+    ctx.strokeStyle = "#ff6b6b"; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(toX(raw[0]), toY(raw[1])); ctx.stroke(); ctx.setLineDash([]);
+  }
+  const bits = [tr.err != null ? `${ft(tr.err)} ft off` : "finger up"];
+  if (tr.med != null) bits.push(`typical ${ft(tr.med)} ft`);
+  if (tr.lag > 0) bits.push(`trails ~${tr.lag.toFixed(1)} s (${ft(tr.med_at_lag)} ft caught up)`);
+  label("truth: " + bits.join(" · "), X + 9, Y + 18, "bold 11px sans-serif", "#ffffff");
+}
+
 function drawPerson(p, now) {
   const color = colorFor(p.mac), e = p.est, m = shown[p.mac];
   const pts = p.trail.map((q) => [toX(q[1]), toY(q[2]), q[4]]);
@@ -465,6 +515,7 @@ function drawMap() {
   drawBoards();
   const now = performance.now() / 1000;
   for (const p of S?.phones || []) drawRings(p);
+  for (const p of S?.phones || []) drawTrace(p);
   for (const p of S?.phones || []) drawPerson(p, now);
   if (placing) label(`click the map where board ${nodeLabel(placing.id)} is`, 10, 18, "13px sans-serif", "#e6b24c");
 }
@@ -483,7 +534,7 @@ function frame(t) {
     if (!e) continue;
     alive.add(p.mac);
     const m = shown[p.mac];
-    if (!m || Math.hypot(m.x - e.x, m.y - e.y) > 3) shown[p.mac] = { x: e.x, y: e.y, unc: e.unc };
+    if (!m || p.snapped || Math.hypot(m.x - e.x, m.y - e.y) > 3) shown[p.mac] = { x: e.x, y: e.y, unc: e.unc };
     else { m.x += (e.x - m.x) * k; m.y += (e.y - m.y) * k; m.unc += (e.unc - m.unc) * k; }
   }
   for (const mac of Object.keys(shown)) if (!alive.has(mac)) delete shown[mac];
@@ -738,7 +789,9 @@ $("labRun").onclick = () => api("/api/lab/run", {});
 async function loadSessions() {
   const list = await (await fetch("/api/sessions")).json();
   $("sessList").innerHTML = list.map((s) => `<div class="sess"><span class="mono">${esc(s.file)} <span class="muted">${(s.bytes / 1024).toFixed(0)} kB</span></span>
+    <button data-trace="${esc(s.file)}" title="Traced walks in this recording become calibration">Use traces</button>
     <button data-del="${esc(s.file)}">Delete</button></div>`).join("") || "none";
+  document.querySelectorAll("#sessList [data-trace]").forEach((b) => (b.onclick = () => api("/api/session/traces", { file: b.dataset.trace })));
   document.querySelectorAll("#sessList [data-del]").forEach((b) => (b.onclick = async () => {
     if (!confirm("Delete " + b.dataset.del + "?")) return;
     await api("/api/session/delete", { file: b.dataset.del });

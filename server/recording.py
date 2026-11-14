@@ -31,8 +31,8 @@ def load_session(path: Path):
 def apply(tr: Tracker, line: dict):
     """Turn one recorded line back into tracker calls. The only place this happens (lab.py and analyze_session.py share it).
 
-    Line kinds: {"rt", "meta": {...}}, {"rt", "motion": {"m", "mv", "st", "hd"}}, {"rt", "anchor": {"m", "x", "y"}}
-    and {"rt", "src", "p": packet}.
+    Line kinds: {"rt", "meta": {...}}, {"rt", "motion": {"m", "mv", "st", "hd"}}, {"rt", "anchor": {"m", "x", "y"}},
+    {"rt", "trace": {"m", "x", "y"}} and {"rt", "src", "p": packet}.
     """
     if "meta" in line:
         meta = line["meta"] or {}
@@ -43,6 +43,9 @@ def apply(tr: Tracker, line: dict):
         hd = mo.get("hd")
         tr.set_motion(str(mo.get("m", "")), int(mo.get("mv", 0)), int(mo.get("st", 0)), line["rt"],
                       float(hd) if isinstance(hd, (int, float)) else None)
+    elif "trace" in line:
+        tc = line["trace"] or {}
+        tr.trace(str(tc.get("m", "")), float(tc["x"]), float(tc["y"]), line["rt"])
     elif "anchor" in line:
         an = line["anchor"] or {}
         tr.anchor(str(an.get("m", "")), float(an["x"]), float(an["y"]), line["rt"])

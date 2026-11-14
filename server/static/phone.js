@@ -1,9 +1,14 @@
 "use strict";
 // Phone page, served by the laptop on the demo network (PhoneHandler in luna_server.py). The server speaks metres;
 // the screen shows feet. Primary calibration is "I'm here" (App.start_mark / _finish_mark); the guided walk over
-// planner.py's route is the alternative under More. What the card shows is decided only by view(), from
-// (mode, S.capture, walk.next).
+// planner.py's route is the alternative under More; "trace" mode records where the holder says they are as test truth
+// (POST /api/trace -> Tracker.trace). What the card shows is decided only by view(), from (mode, S.capture, walk.next).
 const $ = (id) => document.getElementById(id);
+// Trace: a finger sample every TRACE_STEP_MS while it moves (or stays down), posted every TRACE_POST_MS as
+// [age_ms, x, y] (luna_server._phone_trace caps a post at 50 points). The phone keeps TRACE_SHOW_MS of its own line.
+// TRACE_MARGIN_M: room drawn around the outline in trace mode, to trace a little outside it (luna_server.TRACE_MARGIN_M).
+const TRACE_STEP_MS = 100, TRACE_POST_MS = 250, TRACE_SHOW_MS = 60000, TRACE_MARGIN_M = 1.0;
+let finger = null, traceBuf = [], traceLine = [];
 const FT = 0.3048;
 const ft = (m) => (m / FT).toFixed(1);
 const NEAR_M = 0.6, SNAP_M = 0.4;
@@ -301,6 +306,7 @@ function viewChrome() {
   $("me").textContent = S.me ? (S.me.name || S.me.mac) + (est ? ` · blue dot ±${ft(est.unc)} ft` : "") : "";
   const legend = [["#7fa8ff", "you (estimate)"]];
   if (mode === "mark") legend.push(["#e6b24c", "next spot"], ["#3e9e74", "marked: <2 ft off"], ["#e06c6c", ">4 ft off"]);
+  else if (mode === "trace") legend.push(["#ffffff", "your finger (truth)"]);
   else legend.push(["#3e9e74", "route dot"]);
   $("legend").innerHTML = legend.map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join("");
 }
@@ -318,14 +324,52 @@ function view() {
   if (c && c.kind === "walk") return viewWalking();
   if (c) return viewCapture(c);
   if (mode === "walk" && S.route.length) return viewWalkIntro();
+  if (mode === "trace") return viewTrace();
   viewMark();
+}
+
+function addTracePoint(x, y) {
+  const t = performance.now();
+  finger = { x, y, t };
+  traceBuf.push([t, x, y]);
+  traceLine.push([t, x, y]);
+  while (traceLine.length && t - traceLine[0][0] > TRACE_SHOW_MS) traceLine.shift();
+}
+setInterval(() => {
+  if (mode !== "trace") return;
+  const now = performance.now();
+  if (finger && now - finger.t >= TRACE_STEP_MS) addTracePoint(finger.x, finger.y);   // standing with the finger down
+  if (!traceBuf.length) return;
+  const pts = traceBuf.splice(0).slice(-50).map(([t, x, y]) => [Math.round(now - t), Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000]);
+  fetch("/api/trace", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mac: MAC || undefined, pts }) }).catch(() => {});
+}, TRACE_POST_MS);
+
+function viewTrace() {
+  const tr = S.me && S.me.trace;
+  let help = "Put a finger on the map <b>where you are</b> and keep it under you as you walk. Lift it to pause.";
+  if (tr && tr.med != null) {
+    help += `<br><b>Now ${tr.err != null ? ft(tr.err) + " ft off" : "—"}</b> · typical ${ft(tr.med)} ft`;
+    if (tr.lag > 0) help += ` · trails you by ~${tr.lag.toFixed(1)} s (${ft(tr.med_at_lag)} ft once caught up)`;
+  }
+  help += "<br><span class=\"stats\">Save as calibration teaches the map from the lines drawn since the last save " +
+    "(within 2 minutes). Lines you don't save stay a test.</span>";
+  const save = async () => {
+    await new Promise((r) => setTimeout(r, TRACE_POST_MS + 100));   // let the last finger points reach the laptop
+    const res = await call("/api/trace/save");
+    msg = res.added ? ["good", `Saved ✓ ${res.added} calibration spots from your line.`] : ["bad", "Nothing new to save: draw a line of at least 3 s first."];
+    traceLine = [];
+  };
+  card(finger ? "Tracing…" : "Trace your walk", help, [traceLine.length ? "Save as calibration" : "Draw a line first", traceLine.length ? save : null],
+    ["Done", async () => { mode = "mark"; finger = null; }]);
 }
 
 const canvas = $("map"), g = canvas.getContext("2d");
 let tf = { k: 1, ox: 0, oy: 0, w: 0, h: 0 };
 function fitView() {
   const w = canvas.clientWidth, xs = S.polygon.map((p) => p[0]), ys = S.polygon.map((p) => p[1]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), pad = 16;
+  const mg = mode === "trace" ? TRACE_MARGIN_M : 0, pad = 16;
+  const x0 = Math.min(...xs) - mg, x1 = Math.max(...xs) + mg, y0 = Math.min(...ys) - mg, y1 = Math.max(...ys) + mg;
   const k = Math.min((w - 2 * pad) / Math.max(0.1, x1 - x0), (0.62 * innerHeight - 2 * pad) / Math.max(0.1, y1 - y0));
   const h = Math.round((y1 - y0) * k + 2 * pad), dpr = window.devicePixelRatio || 1;
   if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
@@ -421,6 +465,7 @@ function draw() {
   }
   const c = S.capture, walking = c && c.kind === "walk";
   if (walking || (mode === "walk" && !c)) drawRoute(walking && walk.next != null);
+  else if (mode === "trace") drawTraceLine();
   else drawMarks(c);
   const est = S.me && S.me.est;
   if (est && !walking && est.kind !== "stale") {
@@ -431,6 +476,14 @@ function draw() {
   }
 }
 setInterval(() => { if (S && !document.hidden) draw(); }, 60);
+
+function drawTraceLine() {
+  g.strokeStyle = "#ffffffaa"; g.lineWidth = 3; g.lineJoin = "round";
+  g.beginPath();
+  traceLine.forEach(([, x, y], i) => (i ? g.lineTo(toX(x), toY(y)) : g.moveTo(toX(x), toY(y))));
+  g.stroke();
+  if (finger) crosshair(finger.x, finger.y, "#ffffff");
+}
 
 function inside(x, y, poly) {
   let hit = false;
@@ -445,10 +498,28 @@ function nearestIndex(list, x, y) {
   list.forEach((p, i) => { const d = Math.hypot(p[0] - x, p[1] - y); if (d < bestD) { bestD = d; best = i; } });
   return best;
 }
+const mapXY = (ev) => {
+  const r = canvas.getBoundingClientRect();
+  return [(ev.clientX - r.left - tf.ox) / tf.k, (ev.clientY - r.top - tf.oy) / tf.k];
+};
+function traceAt(ev) {
+  const [x, y] = mapXY(ev);
+  if (!finger || Math.hypot(x - finger.x, y - finger.y) > 0.03 || performance.now() - finger.t >= TRACE_STEP_MS) addTracePoint(x, y);
+}
+canvas.addEventListener("pointermove", (ev) => { if (mode === "trace" && finger) traceAt(ev); });
+const lift = () => { if (mode === "trace") { finger = null; view(); } };
+canvas.addEventListener("pointerup", lift);
+canvas.addEventListener("pointercancel", lift);
 canvas.addEventListener("pointerdown", (ev) => {
   if (!S || S.capture) return;
-  const r = canvas.getBoundingClientRect();
-  let x = (ev.clientX - r.left - tf.ox) / tf.k, y = (ev.clientY - r.top - tf.oy) / tf.k;
+  if (mode === "trace") {
+    canvas.setPointerCapture(ev.pointerId);
+    const [x, y] = mapXY(ev);
+    addTracePoint(x, y);
+    view();
+    return;
+  }
+  let [x, y] = mapXY(ev);
   if (mode === "walk") { const i = nearestIndex(S.route, x, y); if (i >= 0) startDot = i; }
   else if (inside(x, y, S.polygon)) {
     // A tap on a plan spot means that spot exactly, so the server counts it done (planner.MARK_DONE_M).
@@ -461,6 +532,7 @@ canvas.addEventListener("pointerdown", (ev) => {
   draw();
 });
 
+$("traceBtn").onclick = () => { if (S && !S.capture) { mode = "trace"; msg = null; tap = null; $("more").open = false; enableMotion(); view(); draw(); } };
 $("walkBtn").onclick = () => { if (S && !S.capture) { mode = "walk"; msg = null; $("more").open = false; view(); draw(); } };
 $("emptyBtn").onclick = () => { if (S && !S.capture) act(() => call("/api/empty/start")); };
 $("clearBtn").onclick = () => {

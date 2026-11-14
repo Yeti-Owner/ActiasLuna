@@ -262,6 +262,7 @@ class RoomView {
       u.target = new THREE.Vector3(e.x, 0, e.y);
       u.targetUnc = e.unc;
       u.stale = stale;
+      u.snap = !!p.snapped;   // app.js snapToTrace: jump, don't glide
       for (const m of [u.orb.material.color, u.orb.material.emissive, u.glow.material.color, u.post.material.color, u.disc.material.color, u.ring.material.color]) m.copy(shade);
       u.orb.material.emissiveIntensity = stale ? 0.15 : 0.9;
       u.disc.material.opacity = stale ? 0.06 : e.kind === "weak" ? 0.1 : 0.16;
@@ -294,7 +295,11 @@ class RoomView {
     const t = (performance.now() - this.start) / 1000;
     for (const g of this.people.values()) {
       const u = g.userData;
-      if (u.target) { u.pos.lerp(u.target, 0.12); u.unc += (u.targetUnc - u.unc) * 0.12; }
+      if (u.target) {
+        const k = u.snap ? 1 : 0.12;
+        u.pos.lerp(u.target, k);
+        u.unc += (u.targetUnc - u.unc) * k;
+      }
       g.position.copy(u.pos);
       const r = Math.max(0.12, u.unc);
       u.disc.scale.setScalar(r);
