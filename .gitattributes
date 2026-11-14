@@ -1,0 +1,2 @@
+# Shell scripts run on Linux (the Vultr VM): keep LF endings even when checked out on Windows.
+*.sh text eol=lf

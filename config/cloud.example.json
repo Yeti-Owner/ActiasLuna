@@ -1,0 +1,5 @@
+{
+  "url": "https://YOUR-VULTR-IP-WITH-DASHES.sslip.io",
+  "ingest_token": "paste MOTH_INGEST_TOKEN from the VM here",
+  "room": "demo-room"
+}
