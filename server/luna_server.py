@@ -33,9 +33,9 @@ import sensing  # noqa: E402
 import settings as cfg  # noqa: E402
 import walkcal  # noqa: E402
 from replay import TICK_S, Replay, load_session  # noqa: E402
-from crowd import Crowd  # noqa: E402
+from crowd import Crowd, jam_offset  # noqa: E402
 from room import Room  # noqa: E402
-from tracker import Status, Tracker, capture_phase  # noqa: E402
+from tracker import Status, Tracker, capture_phase, fmt_mac  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get("LUNA_DATA", ROOT / "data"))
@@ -766,7 +766,17 @@ class App:
         self._decoy_origin = (x0, y0)
         c = self._tracked_center()
         center = None if c is None else (c[0] - x0, c[1] - y0)   # the crowd works in a 0..w / 0..d frame
-        self.decoys.tick(now, self.decoy_room or (max(x1 - x0, 0.5), max(y1 - y0, 0.5)), center=center)
+        boards = {b: (p["x"] - x0, p["y"] - y0) for b, p in self.layout["receivers"].items()}
+        before = self.decoys.members()
+        self.decoys.tick(now, self.decoy_room or (max(x1 - x0, 0.5), max(y1 - y0, 0.5)), center=center,
+                         boards=boards)
+        after = self.decoys.members()
+        # Same event lines tracker.Tracker writes for real phones, so the event log looks the same.
+        for mac in after.keys() - before.keys():
+            self.live.events.append([now, f"device joined {fmt_mac(mac)} {after[mac]}"])
+            self.live.events.append([now, f"tracking {fmt_mac(mac)}"])
+        for mac in before.keys() - after.keys():
+            self.live.events.append([now, f"device left {fmt_mac(mac)}"])
 
     def _decoy_snapshot(self):
         """Decoys moved from the crowd's frame into the layout frame (app.js mergeDecoys shows them as phones)."""
@@ -774,6 +784,36 @@ class App:
         return [dict(d, x=round(d["x"] + ox, 2), y=round(d["y"] + oy, 2),
                      trail=[[p[0], round(p[1] + ox, 3), round(p[2] + oy, 3)] for p in d["trail"]])
                 for d in self.decoys.snapshot()]
+
+    def _jam(self, snap: dict) -> dict:
+        """While the crowd is on, push real people's displayed dots and trail (from when it came on) around with
+        crowd.jam_offset. Copies what it changes: the tracker's own est / trail, Phone.raw and accuracy never move."""
+        since = self.decoys.on_since
+        if since is None:
+            return snap
+        x0, y0, x1, y1 = _bbox(self.layout["polygon"])
+
+        def moved(mac, t, x, y):
+            dx, dy = jam_offset(mac, t)
+            return (round(min(max(x + dx, x0 + 0.15), x1 - 0.15), 3),
+                    round(min(max(y + dy, y0 + 0.15), y1 - 0.15), 3))
+
+        def trail(mac, points):
+            return [p if p[0] < since else [p[0], *moved(mac, p[0], p[1], p[2]), *p[3:]] for p in points]
+
+        phones = []
+        for ph in snap["phones"]:
+            est = ph.get("est")
+            if est and est.get("kind") != Status.STALE.value:
+                x, y = moved(ph["mac"], snap["now"], est["x"], est["y"])
+                ph = dict(ph, est=dict(est, x=x, y=y), trail=trail(ph["mac"], ph["trail"]))
+            phones.append(ph)
+        snap["phones"] = phones
+        body = snap.get("body")
+        if body:
+            x, y = moved("body", snap["now"], body["x"], body["y"])
+            snap["body"] = dict(body, x=x, y=y, trail=trail("body", body.get("trail", [])))
+        return snap
 
     def set_decoys(self, on):
         with self.lock:
@@ -826,7 +866,7 @@ class App:
                 extra["replay"] = replay.info()
                 if view == "replay":
                     return replay.tracker.snapshot(extra)
-            return self.live.snapshot(extra)
+            return self._jam(self.live.snapshot(extra))
 
     def snapshot_json(self, view: str) -> str:
         """Shared by all SSE clients so several open tabs cost one snapshot per tick."""

@@ -73,15 +73,19 @@ function mergeBody(s) {
   });
 }
 
-// Demo crowd (server/crowd.py): decoys join S.phones looking exactly like tracked phones, so the list, the 2D map and
-// the 3D view all show them and the real person blends in. Their MACs are made up and never go back to the server.
+// Demo crowd (server/crowd.py): decoys join S.phones and S.stations looking exactly like tracked phones (faked
+// per-board readings included), so every view shows them and the real person blends in. Their MACs are made up and
+// never go back to the server.
 function mergeDecoys(s) {
   for (const d of s.decoys || []) {
+    const macFmt = d.mac.match(/../g).join(":");
     s.phones.push({
-      mac: d.mac, mac_fmt: d.mac.match(/../g).join(":"), name: "", associated: true, age: 0, per_node: {}, spark: [],
+      mac: d.mac, mac_fmt: macFmt, name: "", ip: d.ip, associated: true, age: 0, per_node: d.per_node, spark: d.spark,
       trail: d.trail.map((q) => [q[0], q[1], q[2], d.unc, "estimated"]),
-      est: { x: d.x, y: d.y, unc: d.unc, raw: [d.x, d.y, d.unc], kind: "estimated", receivers: 3, mode: "calibrated", age: 0, t: s.now },
+      est: { x: d.x, y: d.y, unc: d.unc, raw: [d.x, d.y, d.unc], kind: "estimated", receivers: Object.keys(d.per_node).length, mode: "calibrated", age: 0, t: s.now },
     });
+    s.stations.push({ mac: macFmt, ip: d.ip, r: d.r, nm: "", infra: false });
+    for (const n of s.nodes) if (d.per_node[n.id]) n.frame_rate = Math.round((n.frame_rate + d.per_node[n.id].rate) * 100) / 100;
   }
 }
 

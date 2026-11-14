@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "server"))
 
-from crowd import Crowd, CrowdState  # noqa: E402
+from crowd import JAM_JITTER_M, JAM_R_M, Crowd, CrowdState, jam_offset  # noqa: E402
 
 ROOM = (6.0, 4.5)
 
@@ -59,6 +59,27 @@ class CrowdTest(unittest.TestCase):
         for dec in self.c.snapshot():
             self.assertEqual(len(dec["trail"]), 21)                  # one point per 0.5 s
             self.assertTrue(0.2 <= dec["unc"] <= 0.65)
+
+    def test_decoys_get_board_readings_shaped_like_a_phone_row(self):
+        boards = {"near": (1.0, 1.0), "far": (5.5, 4.0)}
+        self.c.set(True)
+        for i in range(41):           # 10 s
+            self.c.tick(i * 0.25, ROOM, boards=boards)
+        for dec in self.c.snapshot():
+            self.assertEqual(set(dec["per_node"]), set(boards))
+            for row in dec["per_node"].values():
+                self.assertTrue(-75 < row["r"] < -25)
+                self.assertGreater(row["rate"], 0)
+            self.assertEqual(len(dec["spark"]), 2 * 21)              # each board every 0.5 s
+            self.assertTrue(dec["ip"].startswith("192.168.4."))
+
+    def test_jam_offset_is_bounded_and_repeatable(self):
+        for i in range(400):
+            t = 1000.0 + i * 0.1
+            dx, dy = jam_offset("aabbccddeeff", t)
+            self.assertLessEqual((dx * dx + dy * dy) ** 0.5, JAM_R_M + 2 * JAM_JITTER_M)
+            self.assertEqual((dx, dy), jam_offset("aabbccddeeff", t))
+        self.assertNotEqual(jam_offset("aabbccddeeff", 5.0), jam_offset("112233445566", 5.0))
 
     def test_decoys_stay_in_room(self):
         self.c.set(True)
