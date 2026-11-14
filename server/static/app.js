@@ -190,7 +190,40 @@ function whereText(p) {
   const e = p.est;
   if (!e) return Object.keys(S.layout?.receivers || {}).length ? "waiting for all boards…" : "place the boards (Setup → Boards)";
   if (e.kind === "stale") return `not heard for ${age(p.age)}`;
-  return `(${ft(e.x)}, ${ft(e.y)}) ft ± ${ft(e.unc)} ft` + (e.kind === "weak" ? " · few boards hear it" : "");
+  return `(${ft(e.x)}, ${ft(e.y)}) ft ± ${ft(e.unc)} ft` + (e.kind === "weak" ? " · few boards hear it" : "") +
+    (e.camera ? ` · camera (${e.camera === "range" ? "head size" : e.camera})` : "");
+}
+
+// Laptop camera (camera/README.md): one line saying whether it is helping and, if not, what to do about it. The
+// server only sends counts (S.camera); it never sends where unmatched people are.
+const CAM_STALE_S = 3;
+function cameraHtml() {
+  const c = S.camera, on = !!(S.settings || {}).camera;
+  const line = (status, text) => `<span class="dot ${status}"></span>${text}`;
+  if (!c) return line("offline", on ? 'Not connected. Run <span class="mono">python camera/luna_camera.py</span>.'
+    : '<span class="muted">Not in use (optional: run <span class="mono">camera/luna_camera.py</span>, then turn on ' +
+      "<b>Laptop camera helps phone</b> in Settings).</span>");
+  if (c.age == null || c.age > CAM_STALE_S) return line("offline", `Stopped sending ${c.age == null ? "" : age(c.age) + " ago"}: ` +
+    'is <span class="mono">luna_camera.py</span> still running?');
+  if (!c.calibrated) return line("stale", 'Connected but not set up. Quickest: <span class="mono">python camera/head_setup.py ' +
+    "--cam X Y</span> (where the laptop is) and stand on 2-3 spots. Or floor marks with " +
+    '<span class="mono">camera/calibrate.py</span>.');
+  const seen = `sees ${c.seen}` + (c.seen_by_head ? ` (${c.seen_by_head} by head)` : "");
+  // Only nag when people with hidden feet can't be placed at all: no head-height mapping and no head-size ranging.
+  const head = c.head_calibrated || c.range_calibrated ? "" : '<br><span class="warnbox">Feet only: run ' +
+    '<span class="mono">camera/head_setup.py</span> (or recalibrate pressing space) so people behind a desk count too.</span>';
+  if (!on) return line("stale", `Connected, ${seen}, but <b>Laptop camera helps phone</b> is off in Settings.`) + head;
+  return line("online", `Live · ${seen} · sharpening ${c.used} phone${c.used === 1 ? "" : "s"}`) + head;
+}
+
+// Simple view: a "camera" chip beside the board chips, only once a camera is in play (Wi-Fi-only setups stay as
+// they are). Green when it is live, calibrated and switched on; hover for what is missing.
+function cameraChip() {
+  const c = S.camera, on = !!(S.settings || {}).camera;
+  if (!c && !on) return "";
+  const live = c && c.age != null && c.age <= CAM_STALE_S && c.calibrated && on;
+  return ` <span class="rxchip" title="${esc(cameraHtml().replace(/<[^>]+>/g, ""))}">` +
+    `<span class="dot ${live ? "online" : "stale"}"></span>camera</span>`;
 }
 const displayName = (p) => p.name || "Phone " + p.mac_fmt.slice(-5);
 
@@ -199,7 +232,8 @@ function renderSimple() {
   $("sPeople").innerHTML = people.map((p) => {
     const e = p.est, stale = e && e.kind === "stale";
     const certainty = e && !stale ? (e.unc < 1.5 * FT ? "pinpointed" : e.unc < 3 * FT ? "located" : "rough area") : "";
-    const line = stale ? `not heard for ${age(p.age)}` : e ? `${placeName(e.x, e.y)} · ${certainty}, within ~${ft(e.unc, 0)} ft` : esc(whereText(p));
+    const line = stale ? `not heard for ${age(p.age)}` : e ? `${placeName(e.x, e.y)} · ${certainty}, within ~${ft(e.unc, 0)} ft` +
+      (e.camera ? " · camera helping" : "") : esc(whereText(p));
     return `<div class="person ${stale ? "stale" : ""}"><span class="sw" style="background:${colorFor(p.mac)}"></span>
       <div><div class="nm">${esc(displayName(p))}</div><div class="wh">${line}</div></div></div>`;
   }).join("") || '<div class="muted small">Nobody yet. Join a phone to the demo network.</div>';
@@ -231,7 +265,8 @@ function renderSetup() {
   if (document.activeElement !== $("sRoomH")) $("sRoomH").value = ft(b.y1 - b.y0);
 
   const unplaced = S.nodes.filter((n) => !S.layout.receivers[n.id]).length;
-  const chips = S.nodes.map((n) => `<span class="rxchip"><span class="dot ${n.status}"></span>${esc(n.label)}</span>`).join("");
+  const chips = S.nodes.map((n) => `<span class="rxchip"><span class="dot ${n.status}"></span>${esc(n.label)}</span>`).join("") +
+    cameraChip();
   const boardsDone = setStep("stBoards", S.nodes.length >= 3 && !unplaced,
     S.nodes.length ? chips + (unplaced ? ` <span class="warnbox">${unplaced} to place</span>` : "") : '<span class="warnbox">none heard</span>');
 
@@ -278,6 +313,7 @@ function renderTables() {
         <td>${age(n.age)}</td><td>${n.pkt_rate}</td><td>${n.frame_rate}${n.ctrl_rate ? ` <span class="muted">(${n.ctrl_rate} ctl)</span>` : ""}</td>
         <td>${n.loss_pct}%</td><td class="small muted">${notes}</td></tr>`;
     }).join("") + (S.nodes.length ? "" : '<tr><td colspan=7 class="muted">no boards heard yet</td></tr>');
+  $("camInfo").innerHTML = cameraHtml();
 
   const ids = S.nodes.map((n) => n.id);
   const cell = (q) => (q && q.r != null ? `${q.r}<span class=muted>/${q.rate}</span>` : "<span class=muted>—</span>");
@@ -441,7 +477,12 @@ function drawPerson(p, now) {
   }
   ctx.beginPath(); ctx.arc(X, Y, 7, 0, 2 * Math.PI);
   if (e.kind === "estimated") { ctx.fillStyle = c; ctx.fill(); } else { ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.stroke(); }
-  const note = stale ? ` (not heard ${age(p.age)})` : e.kind === "weak" ? " (few boards)" : "";
+  if (e.camera && !stale) {
+    // The laptop camera is sharpening this phone: a white ring (dashed when placed by the head, feet hidden).
+    ctx.beginPath(); ctx.arc(X, Y, 11, 0, 2 * Math.PI); ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
+    ctx.setLineDash(e.camera !== "feet" ? [3, 3] : []); ctx.stroke(); ctx.setLineDash([]);
+  }
+  const note = (stale ? ` (not heard ${age(p.age)})` : e.kind === "weak" ? " (few boards)" : "") + (e.camera && !stale ? " · camera" : "");
   label((p.name || p.mac_fmt.slice(-5)) + note, X + 10, Y - 9, "12px sans-serif", "#e7eaf6");
   if (!stale && m.unc > VAGUE_UNC_M) label(placeName(m.x, m.y), X + 10, Y + 5, "11px sans-serif", "#a3abc8");
 }

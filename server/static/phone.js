@@ -152,7 +152,11 @@ $("motion").onclick = async () => { await enableMotion(); view(); };
 
 function captureEnded(cap) {
   if (cap.kind === "empty") msg = ["good", "Empty room recorded ✓ Come back in."];
-  else if (cap.kind === "walk") {
+  else if (cap.kind === "walk" && cap.camera) {
+    msg = ["good", `Camera walk saved ✓ ${Math.round(cap.camera.points / 4)} s of positions from the camera. ` +
+      "The laptop's Log tab says how many calibration points it made."];
+    mode = "mark";
+  } else if (cap.kind === "walk") {
     msg = ["good", "Walk saved ✓ " + (S.walks >= 2 ? "" : "Walking it again the other way round makes the map better.")];
     walk = { next: null, done: [], skipped: new Set() };
     mode = "mark";
@@ -255,6 +259,31 @@ function viewWalkIntro() {
   [`Start at dot ${startDot + 1}`, startWalk], ["Back to marking", async () => { mode = "mark"; }]);
 }
 
+// Camera walk (luna_server.App.start_camera_walk): the laptop camera supplies positions, so there is nothing to tap.
+async function startCamWalk() {
+  await enableMotion();
+  await call("/api/walk/start", { orientation: ori(), camera: true });
+  buzz();
+}
+
+function viewCamIntro() {
+  card("Calibrate with the camera",
+    "Walk slowly around everywhere the <b>laptop camera</b> can see, phone in hand as usual. Stop now and then for a few " +
+    "seconds. Keep your <b>feet in view</b>, and keep everyone else out of view (with two people in view it can't tell " +
+    "who is who, so it waits). A couple of minutes is plenty.",
+    ["Start", startCamWalk], ["Back to marking", async () => { mode = "mark"; }]);
+}
+
+function viewCamWalking(c) {
+  const cam = c.camera || { points: 0, seen: false, crowded: false };
+  const status = cam.crowded ? "⚠ The camera sees more than one person, so it's waiting. Ask others to step out of view."
+    : cam.seen ? "📷 The camera can see you." : "The camera can't see your feet right now. Step into view.";
+  card("Walking with the camera",
+    `${status}<br>Walk slowly, pausing now and then. <span class="stats">${Math.round(cam.points / 4)} s in view · ` +
+    `${Math.floor(c.elapsed / 60)}:${String(Math.floor(c.elapsed % 60)).padStart(2, "0")}</span>`,
+    ["Stop and save", () => call("/api/walk/stop")], ["Cancel", cancel]);
+}
+
 function viewWalking() {
   if (walk.next == null) {
     card("Walk in progress", "This page was reloaded during a walk.", ["Stop and save", () => call("/api/walk/stop")], ["Cancel walk", cancel]);
@@ -312,8 +341,13 @@ function view() {
   $("msg").textContent = !c && msg ? msg[1] : "";
   if (!S.me) return card("Not connected", "Join this phone to the demo Wi-Fi, then reload.");
   if (!S.polygon || S.polygon.length < 3) return card("Room not set up", "Set the room outline on the laptop first (Setup &amp; debug → Layout).");
+  $("camWalkRow").classList.toggle("hidden", !S.camera_ready);
+  if (c && c.kind === "walk" && c.camera) return viewCamWalking(c);
   if (c && c.kind === "walk") return viewWalking();
   if (c) return viewCapture(c);
+  if (mode === "camwalk") return S.camera_ready ? viewCamIntro()
+    : card("Camera not ready", "The laptop camera isn't calibrated or isn't running. Set it up on the laptop first.",
+      null, ["Back to marking", async () => { mode = "mark"; }]);
   if (mode === "walk" && S.route.length) return viewWalkIntro();
   viewMark();
 }
@@ -459,6 +493,7 @@ canvas.addEventListener("pointerdown", (ev) => {
 });
 
 $("walkBtn").onclick = () => { if (S && !S.capture) { mode = "walk"; msg = null; $("more").open = false; view(); draw(); } };
+$("camWalkBtn").onclick = () => { if (S && !S.capture) { mode = "camwalk"; msg = null; $("more").open = false; view(); draw(); } };
 $("emptyBtn").onclick = () => { if (S && !S.capture) act(() => call("/api/empty/start")); };
 $("clearBtn").onclick = () => {
   if (!S || S.capture || !confirm("Delete every mark, walk and check for this room?")) return;

@@ -17,8 +17,9 @@ from dataclasses import dataclass
 import numpy as np
 
 try:
-    from . import homography
+    from . import headrange, homography
 except ImportError:  # run as a plain script from inside camera/
+    import headrange
     import homography
 
 # Tunables: module-level and read when used, so tools and the lab can override them.
@@ -53,17 +54,19 @@ class Detection:
     cov: np.ndarray    # 2x2 floor covariance, m^2
     score: float
     rt: float
-    kind: str = "feet"  # "feet": from the foot point; "head": from the head top with the feet hidden
+    # "feet": foot point (floor mapping); "range": head size + left/right (headrange.py); "head": head top (head mapping)
+    kind: str = "feet"
 
 
 class CameraFusion:
     def __init__(self, calibration=None):
         self.H = None            # floor mapping: image foot point -> floor
         self.Hh = None           # head mapping: image head top -> floor spot below it (optional)
+        self.range = None        # head-size ranging from camera/head_setup.py (optional; works without H)
         self.packet = None       # latest raw `cam` packet; projected when used, so a new calibration applies at once
         self.last_rt = None
         self.last_used = 0
-        self._cache = None       # (packet, H, Hh, detections) for the last projection
+        self._cache = None       # (packet, H, Hh, range, detections) for the last projection
         self.set_calibration(calibration)
 
     def set_calibration(self, calibration):
@@ -78,15 +81,23 @@ class CameraFusion:
         except (ValueError, KeyError, TypeError, np.linalg.LinAlgError):
             self.H = None
         self.Hh = homography.head_from_dict(calibration) if self.H is not None else None
+        rng = calibration.get("head_range") if isinstance(calibration, dict) else None
+        valid = isinstance(rng, dict) and rng.get("k") and rng.get("f", 0) > 0 and len(rng.get("cam") or []) == 2
+        self.range = rng if valid else None
         self._cache = None
 
     @property
     def calibrated(self):
-        return self.H is not None
+        """Usable at all: a floor mapping (calibrate.py) or head-size ranging (head_setup.py), or both."""
+        return self.H is not None or self.range is not None
 
     @property
     def head_calibrated(self):
         return self.Hh is not None
+
+    @property
+    def range_calibrated(self):
+        return self.range is not None
 
     def ingest(self, packet, rt):
         """Take one `cam` packet received at time `rt` (the recorded receive time, not the wall clock)."""
@@ -169,10 +180,16 @@ class CameraFusion:
                     continue            # too short to be a person
                 if ratio is not None and ratio > MAX_HEIGHT_REL:
                     feet = None         # its "bottom" is a desk edge or similar, not the floor: trust the head
+            # Preference: feet (no guess at all), then head size (guesses head size, works sitting), then head height.
             got, kind = None, "feet"
-            if feet:
+            if feet and self.H is not None:
                 got = self._from_feet(*feet, aspect)
-            elif head and self.Hh is not None:
+            if got is None and self.range is not None:
+                obs = headrange.observe(d, w, h)
+                located = headrange.locate(self.range, *obs) if obs else None
+                if located:
+                    got, kind = (located[0], np.array(located[1])), "range"
+            if got is None and head and self.Hh is not None:
                 got, kind = self._from_head(*head, aspect), "head"
             if got is None:
                 continue
@@ -185,12 +202,12 @@ class CameraFusion:
 
     def detections(self, t):
         """Fresh detections at time `t`, in floor metres."""
-        if self.H is None or self.packet is None or abs(t - self.last_rt) > MAX_AGE_S:
+        if not self.calibrated or self.packet is None or abs(t - self.last_rt) > MAX_AGE_S:
             return []
         c = self._cache
-        if c is None or c[0] is not self.packet or c[1] is not self.H or c[2] is not self.Hh:
-            c = self._cache = (self.packet, self.H, self.Hh, self._project(self.packet, self.last_rt))
-        return c[3]
+        if c is None or c[0] is not self.packet or c[1] is not self.H or c[2] is not self.Hh or c[3] is not self.range:
+            c = self._cache = (self.packet, self.H, self.Hh, self.range, self._project(self.packet, self.last_rt))
+        return c[4]
 
     def assign(self, tracks, t):
         """Match fresh detections to phone tracks, one to one.
@@ -240,5 +257,8 @@ class CameraFusion:
         """Summary safe for the snapshot: counts only, never positions of unmatched people."""
         age = None if self.last_rt is None else round(t - self.last_rt, 1)
         dets = self.detections(t)
-        return {"calibrated": self.calibrated, "head_calibrated": self.head_calibrated, "age": age,
-                "seen": len(dets), "seen_by_head": sum(1 for d in dets if d.kind == "head"), "used": self.last_used}
+        return {"calibrated": self.calibrated, "head_calibrated": self.head_calibrated,
+                "floor_calibrated": self.H is not None, "range_calibrated": self.range_calibrated, "age": age,
+                # Placed from the head (size or height) because no usable feet were seen.
+                "seen": len(dets), "seen_by_head": sum(1 for d in dets if d.kind in ("head", "range")),
+                "used": self.last_used}

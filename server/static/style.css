@@ -88,6 +88,7 @@ ol.steps { margin: 4px 0 8px; }
 .lg.est { background: var(--acc); }
 .lg.weak { border: 2px solid var(--acc); }
 .lg.stale { background: var(--stale); }
+.lg.cam { background: var(--acc); box-shadow: 0 0 0 2px var(--bg, #090b16), 0 0 0 4px #fff; margin-left: 3px; margin-right: 7px; }
 
 #replayBar { display: flex; align-items: center; gap: 8px; padding: 6px; }
 #replayBar progress { flex: 1; }

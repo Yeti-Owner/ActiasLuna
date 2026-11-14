@@ -40,7 +40,27 @@ pip install -r camera/requirements.txt     # numpy + OpenCV 4.x (OpenCV 5 remove
 python camera/test_camera.py               # unit tests, no camera needed
 ```
 
-**Calibrate** (once per camera placement; redo it if the laptop or its lid moves):
+There are two ways to set the camera up, and you can do both. Each is done once per camera placement; redo it if
+the laptop or its lid moves.
+
+**Quick: head-size ranging** (`head_setup.py`, no floor marks). The camera judges distance from how big a head looks
+and direction from where it is left to right. It works with feet hidden and for people sitting down.
+
+1. Measure where the laptop camera sits on the floor plan, in metres from the layout's (0, 0) corner.
+2. Run `python camera/head_setup.py --cam X Y`.
+3. Stand on 2-3 spots at known positions, facing the camera: one left of view, one middle, one right, at different
+   distances. Press **space** on each, hold still for a moment, then type the spot's `x y`.
+4. It prints which way the camera faces, how wide its view is, and how far off each spot would be placed. Press
+   **s** to save. It goes under `head_range` in `data/camera/calibration.json`, next to any floor calibration.
+
+You don't measure the camera's angle or field of view: three spots are enough to work them out (`headrange.solve`).
+Accuracy is set by how much people's heads differ in size, about ±12% of the distance along the line of sight
+(roughly ±0.3 m at 2.5 m); direction is good to a few degrees. In simulation it cut the median error from 1.28 m
+(Wi-Fi alone) to 0.30 m, and behind a desk from 1.60 m to 0.24 m.
+
+**Precise: floor marks** (`calibrate.py`). Feet are on the floor, so this needs no size guess and is the most
+accurate when feet are visible. With both set up, the server uses feet when it sees them, then head size, then
+head height. It is also needed for calibrating the Wi-Fi map with the camera (below), which only trusts feet.
 
 1. Mark 4 or more spots on the floor at known positions in the layout's coordinates, in metres. Spread them across
    the area the camera sees, with none three in a line. Board positions from the Layout tab, or furniture corners
@@ -101,6 +121,37 @@ its dot.
 
 A person is used if either their feet or their head is in view; feet win when both are and the height is
 plausible.
+
+## Calibrating the Wi-Fi map with the camera
+
+Once the camera is calibrated, it can do the tapping for the Wi-Fi calibration: it already knows where you are.
+
+1. Run `camera/luna_camera.py` on the laptop. The camera must be calibrated (with space marks).
+2. On the phone page, open **More** → **Calibrate with the laptop camera** → **Start**. The button only appears while
+   the camera is calibrated and sending.
+3. Walk slowly around everywhere the camera can see, phone in hand, stopping for a few seconds now and then. The
+   card says whether the camera can see you right now. A couple of minutes is plenty.
+4. Press **Stop and save**. The laptop's Log tab says how many calibration points it made.
+
+How it works:
+- **Recording:** each time the camera sees exactly one person with their feet in view, their floor position is
+  recorded as where the phone is (`Tracker._record_camera_walk`).
+- **When nothing is recorded:** if several people are in view, nothing is recorded (it can't tell who has the
+  phone), and the phone page asks others to step out. Head-only detections aren't used either, since feet need no
+  height guess.
+- **Turning positions into points:** `walkcal.camera_truth` resamples the positions every 0.25 s and decides walking
+  or standing from the phone's motion reports (or from the camera's own speed). It snaps each standing stretch to its
+  median position.
+- **Storage:** after that, it is an ordinary walk. `walkcal.walk_spots` makes the calibration points, and they are
+  stored with the raw camera positions under `walks`, so they rebuild if `walkcal.VERSION` changes. They are held
+  out together in accuracy checks, and the lab uses them as ground truth.
+- **Settings:** it doesn't need the **Laptop camera helps phone** setting. Calibration never touches live
+  positions.
+- **Coverage:** it only covers what the camera sees. Use **I'm here** marks for the rest of the room.
+
+In simulation, a 2-minute camera walk made 41 calibration points and improved Wi-Fi-only tracking from 0.78 m to
+0.55 m median error. That is a simulated room, so the real gain will differ; the lab measures it on your
+recordings.
 
 ## Trying it without a webcam
 

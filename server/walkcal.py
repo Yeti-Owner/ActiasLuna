@@ -15,6 +15,10 @@ whenever the spots produced from the same capture change: luna_server rebuilds s
 
 Guided walks are the secondary method; "I'm here" marks (luna_server.App._finish_mark) are the primary one. Between
 two marks the person walks freely, so those legs only feed the compass offset and stride (leg_fit, motion_fit).
+
+Camera walks (capture has "cam": [[t, x, y], ...]) need no taps: the laptop camera (camera/fusion.py) saw the walker's
+feet, alone in view, at those floor positions. camera_truth turns them into the same truth rows, so spots, held-out
+blocks, the compass offset and device-free windows all come out exactly as for a tapped walk.
 """
 from __future__ import annotations
 
@@ -53,6 +57,13 @@ LEG_STRAIGHT = 0.9
 LEG_MIN_COUNT = 2
 HEADING_MIN_AGREE = 0.7
 WALK_VOTE_M = 5.0
+# Camera walks. Camera positions further apart than CAM_GAP_S (walker out of view, or someone else in view) leave a
+# hole in the truth. Without motion reports, faster than CAM_MOVE_MPS over CAM_SPEED_S counts as walking. Headings
+# come from the camera track over CAM_SPEED_S, only when it moved at least CAM_HEADING_M.
+CAM_GAP_S = 0.75
+CAM_MOVE_MPS = 0.25
+CAM_SPEED_S = 1.0
+CAM_HEADING_M = 0.15
 
 
 def _marks(capture: dict) -> List[list]:
@@ -79,11 +90,72 @@ def _activity(motion: List[list], times: List[float]) -> List[int]:
     return active
 
 
+def is_camera_walk(capture: dict) -> bool:
+    return capture.get("cam") is not None
+
+
+def _cam_at(pts: List[list], t: float) -> Optional[tuple]:
+    """Camera position at t, interpolated between the two camera points around it if they are close in time."""
+    for (ta, xa, ya), (tb, xb, yb) in zip(pts, pts[1:]):
+        if ta <= t <= tb:
+            if tb - ta > CAM_GAP_S:
+                return None
+            f = (t - ta) / (tb - ta) if tb > ta else 0.0
+            return xa + f * (xb - xa), ya + f * (yb - ya)
+    return None
+
+
+def camera_truth(capture: dict) -> List[tuple]:
+    """truth() for a camera walk: the camera's positions resampled every STEP_S.
+
+    Walking or standing comes from the phone's motion reports when there are any, else from the camera's own speed.
+    Each standing stretch is snapped to its median position: the median of many camera readings beats any one of them,
+    and _runs keeps a standing spot together only while its position doesn't change.
+    """
+    pts = sorted([float(p[0]), float(p[1]), float(p[2])] for p in capture.get("cam") or [])
+    if len(pts) < 2:
+        return []
+    times = [pts[0][0] + i * STEP_S for i in range(int((pts[-1][0] - pts[0][0]) / STEP_S) + 1)]
+    rows = [(t, _cam_at(pts, t)) for t in times]
+    rows = [(t, p) for t, p in rows if p is not None]
+    if not rows:
+        return []
+    motion = _motion(capture)
+    active = _activity(motion, [t for t, _ in rows]) if motion else None
+    half = CAM_SPEED_S / 2
+    out: List[list] = []
+    for i, (t, (x, y)) in enumerate(rows):
+        before = _cam_at(pts, max(pts[0][0], t - half)) or (x, y)
+        after = _cam_at(pts, min(pts[-1][0], t + half)) or (x, y)
+        dist = math.hypot(after[0] - before[0], after[1] - before[1])
+        moving = active[i] if active is not None else int(dist / CAM_SPEED_S > CAM_MOVE_MPS)
+        heading = math.atan2(after[1] - before[1], after[0] - before[0]) if moving and dist >= CAM_HEADING_M else None
+        out.append([t, x, y, moving, heading])
+    # Snap standing stretches (contiguous in time) to their median position.
+    i = 0
+    while i < len(out):
+        j = i
+        while (j + 1 < len(out) and not out[i][3] and not out[j + 1][3]
+               and out[j + 1][0] - out[j][0] < 2 * STEP_S - 1e-9):
+            j += 1
+        if not out[i][3]:
+            xs = sorted(r[1] for r in out[i:j + 1])
+            ys = sorted(r[2] for r in out[i:j + 1])
+            mx, my = xs[len(xs) // 2], ys[len(ys) // 2]
+            for r in out[i:j + 1]:
+                r[1], r[2] = mx, my
+        i = j + 1
+    return [(round(t, 3), round(x, 3), round(y, 3), m, h) for t, x, y, m, h in out]
+
+
 def truth(capture: dict) -> List[tuple]:
     """Known walker positions [(t, x, y, moving, facing or None)] every STEP_S, t relative to the capture start.
 
-    Unknown stretches (detours, legs walked implausibly fast or slow) are simply absent.
+    Unknown stretches (detours, legs walked implausibly fast or slow, camera walks with the walker out of view) are
+    simply absent.
     """
+    if is_camera_walk(capture):
+        return camera_truth(capture)
     marks, motion = _marks(capture), _motion(capture)
     out: List[tuple] = []
     for (t0, x0, y0, *_), (t1, x1, y1, *rest) in zip(marks, marks[1:]):
@@ -168,7 +240,7 @@ def _runs(tr: List[tuple]):
 
 def walk_spots(capture: dict, walk_id: str) -> List[dict]:
     tr = truth(capture)
-    if len(_marks(capture)) < 2 or not tr:
+    if not tr or (len(_marks(capture)) < 2 and not is_camera_walk(capture)):
         return []
     samples = sorted(capture.get("samples") or [])
     motion = _motion(capture)
@@ -317,9 +389,12 @@ def motion_fit(walks: List[dict], legs: List[dict]):
 
 def raw_walk(capture: dict, walk_id: str) -> dict:
     """The capture as stored under "walks" in the calibration file: enough to rebuild spots and truth later."""
-    return {"id": walk_id, "phone": capture["phone"], "orientation": capture.get("orientation", "hand"),
-            "t0": capture["t0"], "marks": capture.get("marks") or [], "motion": capture.get("motion") or [],
-            "samples": capture.get("samples") or []}
+    raw = {"id": walk_id, "phone": capture["phone"], "orientation": capture.get("orientation", "hand"),
+           "t0": capture["t0"], "marks": capture.get("marks") or [], "motion": capture.get("motion") or [],
+           "samples": capture.get("samples") or []}
+    if is_camera_walk(capture):
+        raw["cam"] = capture["cam"]
+    return raw
 
 
 def df_walk(capture: dict) -> List[dict]:
@@ -330,11 +405,12 @@ def df_walk(capture: dict) -> List[dict]:
     marks = _marks(capture)
     items = sensing.link_items(capture.get("links"))
     tr = truth(capture)
-    if len(marks) < 2 or not items or not tr:
+    if not items or not tr or (len(marks) < 2 and not is_camera_walk(capture)):
         return []
+    start, end = (marks[0][0], marks[-1][0]) if len(marks) >= 2 else (tr[0][0], tr[-1][0])
     out = []
     k = 0
-    for tc, window in sensing.windows(items, marks[0][0], marks[-1][0], step=0.5):
+    for tc, window in sensing.windows(items, start, end, step=0.5):
         while k + 1 < len(tr) and tr[k + 1][0] <= tc:
             k += 1
         if abs(tr[k][0] - tc) > STEP_S:

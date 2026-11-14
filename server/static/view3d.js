@@ -343,7 +343,8 @@ class RoomView {
       for (const m of [u.orb.material.color, u.orb.material.emissive, u.glow.material.color, u.post.material.color, u.disc.material.color, u.ring.material.color]) m.copy(shade);
       u.orb.material.emissiveIntensity = stale ? 0.15 : 0.9;
       u.disc.material.opacity = stale ? 0.06 : e.kind === "weak" ? 0.1 : 0.16;
-      const text = (p.name || "Phone " + p.mac_fmt.slice(-5)) + (stale ? " (not heard)" : e.kind === "weak" ? " (few boards)" : "");
+      const text = (p.name || "Phone " + p.mac_fmt.slice(-5)) + (stale ? " (not heard)" : e.kind === "weak" ? " (few boards)" : "") +
+        (e.camera && !stale ? " · camera" : "");
       if (u.text !== text) {
         if (u.tag) g.remove(u.tag);
         u.tag = labelSprite(text, { size: 0.15 });

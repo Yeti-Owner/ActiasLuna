@@ -49,6 +49,8 @@ ORIENTATIONS = ("hand", "front_pocket", "back_pocket", "bag")
 EMPTY_LEAVE_S = 15.0
 EMPTY_S = 30.0
 SCAN_MATCH_M = 0.3
+# A camera walk can start only if the laptop camera sent a packet this recently (App.camera_ready).
+CAMERA_LIVE_S = 3.0
 SCAN_MAX_BYTES = 300 << 20
 BUSY = (409, "a capture is already running")
 # "I'm here": MARK_DELAY_S lets the hand settle after the tap, then MARK_S of standing readings. Stretches the phone
@@ -158,6 +160,7 @@ class App:
         self.blocked = []
         self.scan_objects = []
         self._route_cache = (None, None)
+        self._camera_cache = (None, None)
         self.map = None
         self.df_map = None
         self.map_links = {}
@@ -333,10 +336,25 @@ class App:
     def _headings(self) -> dict:
         return {mac: h[0] for mac, h in self.calib.get("heading", {}).items()}
 
+    def camera_calib(self):
+        """Laptop camera calibration from camera/calibrate.py; re-read when the file changes, None if there is none.
+
+        The same dict object is returned until the file changes, so the tracker only refits on a real change.
+        """
+        path = DATA / "camera" / "calibration.json"
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = None
+        if self._camera_cache[0] != mtime:
+            calib = read_json(path, None) if mtime is not None else None
+            self._camera_cache = (mtime, calib if isinstance(calib, dict) else None)
+        return self._camera_cache[1]
+
     def ctx(self) -> dict:
         return {"map": self.map, "settings": self.settings, "df": self.df_map, "layout": self.layout,
                 "objects": [o["footprint"] for o in self.scan_objects], "heading": self._headings(),
-                "stride": self.calib.get("stride")}
+                "stride": self.calib.get("stride"), "camera": self.camera_calib()}
 
     def start_spot(self, body: dict, phone: str, default_s: float, delay: float):
         """Standing calibrate/test capture from a request body; the caller checked nothing is running."""
@@ -392,7 +410,7 @@ class App:
             return
         jobs = lab.jobs(dict(self.settings), self.layout, list(self.calib["spots"]), dict(self.map_links),
                         planner.blocked(self.scan_objects), truth_list, sessions, self._headings(),
-                        self.calib.get("stride"))
+                        self.calib.get("stride"), self.camera_calib())
         self.lab = {"state": "running", "started": time.time(), "sessions": len(sessions), "truths": len(truth_list)}
 
         def worker():
@@ -435,7 +453,22 @@ class App:
         hint = "" if base else " (no link data: are the boards running current firmware?)"
         self._note(f"empty room recorded: {len(base)} board-to-board links{hint}")
 
+    def camera_ready(self) -> bool:
+        """A camera walk can start: the laptop camera has a floor calibration (feet are the only positions precise
+        enough to train the map from; head-size ranging alone isn't) and sent a packet in the last CAMERA_LIVE_S."""
+        cam = self.live.camera
+        return cam.H is not None and cam.last_rt is not None and time.time() - cam.last_rt <= CAMERA_LIVE_S
+
+    def start_camera_walk(self, mac: str, body: dict):
+        """Calibrate with the laptop camera: a walk whose positions come from the camera instead of taps."""
+        require(self.live.camera.H is not None,
+                "the camera needs its floor calibration for this (python camera/calibrate.py on the laptop)")
+        require(self.camera_ready(), "the laptop camera isn't sending (start python camera/luna_camera.py)")
+        self.live.start_walk(mac, orientation(body), time.time(), camera=True)
+
     def _finish_walk(self, cap: dict):
+        if walkcal.is_camera_walk(cap):
+            return self._finish_camera_walk(cap)
         walk_id = f"walk{int(cap['t0'])}"
         spots = walkcal.walk_spots(cap, walk_id)
         self.calib["spots"].extend(spots)
@@ -456,6 +489,31 @@ class App:
             note = ""
         self._note(f"walk saved: {standing} standing + {len(spots) - standing} walking points "
                    f"from {len(cap['marks'])} taps{note}")
+
+    def _finish_camera_walk(self, cap: dict):
+        """Same storage as a tapped walk (spots, raw walk, device-free windows, compass refit), from camera truth."""
+        walk_id = f"camwalk{int(cap['t0'])}"
+        spots = walkcal.walk_spots(cap, walk_id)
+        self.calib["spots"].extend(spots)
+        if spots:
+            self.calib["walks"].append(walkcal.raw_walk(cap, walk_id))
+            self.calib["walkcal_v"] = walkcal.VERSION
+        self.calib["df_walk"].extend(walkcal.df_walk(cap))
+        self._refit_motion(self.calib)
+        self._save_calib()
+        if spots:
+            self._rebuild()
+        standing = sum(1 for s in spots if s.get("still"))
+        seen_s = len(cap["cam"]) * 0.25
+        if spots:
+            note = ""
+        elif not cap["cam"]:
+            note = (" - the camera never saw you alone with your feet in view"
+                    + (" (others were in view)" if cap.get("cam_crowded") else ""))
+        else:
+            note = " - too little time in view of the camera; walk where it can see your feet"
+        self._note(f"camera walk saved: {standing} standing + {len(spots) - standing} walking points "
+                   f"from {seen_s:.0f} s in view of the camera{note}")
 
     def _finish_spot(self, cap: dict):
         record = {k: cap[k] for k in ("kind", "phone", "x", "y", "orientation", "duration", "per_node", "warnings",
@@ -671,7 +729,8 @@ class App:
                     self.live.bad_packets += 1
                 continue
             with self.lock:
-                self.known_nodes.add(src[0])
+                if not (isinstance(pkt, dict) and pkt.get("t") == "cam"):   # the camera needs no subscription
+                    self.known_nodes.add(src[0])
                 self.live.ingest(pkt, rt, src)
                 self.record(rt, src, pkt)
 
@@ -906,7 +965,7 @@ class App:
                "tests": [{"x": t["x"], "y": t["y"], "errors_m": t.get("errors_m", [])}
                          for t in self.calib.get("tests", [])[-20:]],
                "spots": [[s["x"], s["y"], s.get("kind", "calibrate")] for s in self.calib["spots"]],
-               "me": None, "capture": None, "https": self.phone_https}
+               "me": None, "capture": None, "https": self.phone_https, "camera_ready": self.camera_ready()}
         marks = self._mark_rows()
         recent = [e for *_, e in marks[-8:] if e is not None]
         out.update(marks=marks, typical_m=sorted(recent)[len(recent) // 2] if len(recent) >= 2 else None,
@@ -928,7 +987,8 @@ class App:
             out["capture"] = {"kind": cap["kind"], "phase": capture_phase(cap, now),
                               "elapsed": round(now - cap["t0"], 1), "duration": cap["duration"],
                               "x": cap["x"], "y": cap["y"],
-                              "marks": len(cap["marks"]), "frames": sum(s[2] for s in cap["samples"])}
+                              "marks": len(cap["marks"]), "frames": sum(s[2] for s in cap["samples"]),
+                              "camera": self.live.camera_walk_status(now)}
         return out
 
 
@@ -1265,7 +1325,8 @@ def _phone_motion(a: App, b: dict, mac: str, mine: bool):
 PHONE_POST = {
     "/api/mark": lambda a, b, mac, mine: a.start_mark(mac, b),
     "/api/mark/undo": lambda a, b, mac, mine: BUSY if a.live.capture else a.undo_mark(mac),
-    "/api/walk/start": lambda a, b, mac, mine: a.live.start_walk(mac, orientation(b), time.time()),
+    "/api/walk/start": lambda a, b, mac, mine: (a.start_camera_walk(mac, b) if b.get("camera")
+                                                else a.live.start_walk(mac, orientation(b), time.time())),
     "/api/capture": lambda a, b, mac, mine: a.start_spot(b, mac, 12, 3.0),
     "/api/walk/mark": _phone_mark,
     "/api/motion": _phone_motion,

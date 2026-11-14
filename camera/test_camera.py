@@ -12,6 +12,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fusion       # noqa: E402
+import headrange    # noqa: E402
 import homography   # noqa: E402
 import luna_camera  # noqa: E402
 
@@ -118,7 +119,8 @@ class FusionTest(unittest.TestCase):
 
     def test_status_has_no_positions(self):
         self.cam.ingest(self.packet((0.5, 0.8)), rt=10.0)
-        self.assertEqual(set(self.cam.status(10.0)), {"calibrated", "head_calibrated", "age", "seen", "seen_by_head", "used"})
+        self.assertEqual(set(self.cam.status(10.0)), {"calibrated", "head_calibrated", "floor_calibrated",
+                                                      "range_calibrated", "age", "seen", "seen_by_head", "used"})
 
     def test_new_calibration_applies_to_held_packet(self):
         cam = fusion.CameraFusion(None)
@@ -294,6 +296,77 @@ class MoverTracksTest(unittest.TestCase):
         tr = luna_camera.MoverTracks()
         self.run_frames(tr, [[(560 + 15 * i, 100, 60, 200)] for i in range(5)])   # reaches the right edge
         self.assertEqual(tr.update([], 1.0, self.W), [])
+
+
+FACE_M = 0.22   # crown-to-chin height of the test faces
+
+
+def face_obs(x, y, face=FACE_M, top=CAL_HEAD_M):
+    """(size, x_off) of a face box for someone at floor (x, y), as the pinhole test camera sees it."""
+    u0, v0 = pinhole(x, y, top)
+    u1, v1 = pinhole(x, y, top - face)
+    return v1 - v0, ((u0 + u1) / 2 - 0.5) * 4 / 3
+
+
+RANGE_SPOTS = [(1.5, 3.5), (2.5, 2.5), (3.5, 1.5)]   # left of view, middle, right
+
+
+def range_cal():
+    return headrange.solve((0.2, 0.2), [{"xy": xy, "obs": {"face": face_obs(*xy)}} for xy in RANGE_SPOTS])
+
+
+class HeadRangeTest(unittest.TestCase):
+    def test_setup_recovers_camera_facing_and_view(self):
+        cal = range_cal()
+        self.assertAlmostEqual(cal["yaw"], 0.8, delta=np.radians(2))   # the pinhole camera's real facing
+        self.assertAlmostEqual(cal["f"], 0.5 * 4 / 3, delta=0.05)      # its focal length in frame heights
+        self.assertLess(cal["rms_deg"], 1.0)
+
+    def test_places_people_from_head_size(self):
+        cal = range_cal()
+        for x, y in ((2.2, 2.6), (3.0, 2.0), (1.8, 3.0)):
+            (gx, gy), _ = headrange.locate(cal, "face", *face_obs(x, y))
+            self.assertLess(np.hypot(gx - x, gy - y), 0.15)
+
+    def test_bigger_head_errs_along_sight_line_within_uncertainty(self):
+        cal = range_cal()
+        x, y = 2.6, 2.4
+        (gx, gy), cov = headrange.locate(cal, "face", *face_obs(x, y, face=FACE_M * 1.1))
+        err = np.array([gx - x, gy - y])
+        sight = np.array([x - 0.2, y - 0.2])
+        self.assertGreater(np.hypot(*err), 0.1)                       # a bigger head looks nearer
+        self.assertLess(err @ sight, 0)                               # ...placed toward the camera
+        self.assertGreater(abs(err @ sight) / (np.linalg.norm(err) * np.linalg.norm(sight)), 0.97)
+        self.assertLess(np.sqrt(err @ np.linalg.solve(np.array(cov), err)), 1.5)
+
+    def test_needs_spread_out_spots(self):
+        with self.assertRaises(ValueError):
+            headrange.solve((0.2, 0.2), [{"xy": (2.5, 2.5), "obs": {"face": face_obs(2.5, 2.5)}}])
+
+    def test_fusion_uses_range_without_floor_calibration(self):
+        cam = fusion.CameraFusion({"version": 1, "head_range": range_cal()})
+        self.assertTrue(cam.calibrated)
+        self.assertFalse(cam.head_calibrated)
+        size, x_off = face_obs(2.2, 2.6)
+        cx = 0.5 + x_off * 3 / 4                                      # back to a box centre in frame widths
+        det = {"bx": cx - 0.02, "bw": 0.04, "by": 0.3, "bh": size, "s": 0.6, "k": "face"}
+        cam.ingest({"t": "cam", "w": 640, "h": 480, "det": [det]}, 1.0)
+        d = cam.detections(1.0)[0]
+        self.assertEqual(d.kind, "range")
+        self.assertLess(np.hypot(d.x - 2.2, d.y - 2.6), 0.15)
+        self.assertEqual(cam.status(1.0)["seen_by_head"], 1)
+
+    def test_feet_still_preferred_when_floor_calibrated(self):
+        rec = head_calibration()
+        rec["head_range"] = range_cal()
+        cam = fusion.CameraFusion(rec)
+        u, v = pinhole(2.2, 2.6, 0.0)
+        size, x_off = face_obs(2.2, 2.6, face=FACE_M * 1.3)          # a misleading head size...
+        det = {"u": u, "v": v, "bx": u - 0.02, "bw": 0.04, "by": 0.3, "bh": size, "s": 0.9, "k": "body"}
+        cam.ingest({"t": "cam", "w": 640, "h": 480, "det": [det]}, 1.0)
+        d = cam.detections(1.0)[0]
+        self.assertEqual(d.kind, "feet")                              # ...is ignored when the feet are seen
+        self.assertAlmostEqual(d.x, 2.2, delta=1e-6)
 
 
 class PacketTest(unittest.TestCase):
