@@ -625,8 +625,22 @@ class App:
         xs, ys = [float(p[0]) for p in pts], [float(p[1]) for p in pts]
         return min(xs), min(ys), max(xs), max(ys)
 
+    def _tracked_center(self):
+        """The live position of the real person the crowd should hide (layout frame), or None if nobody is tracked.
+        Prefers a tracked phone's estimate; falls back to the phone-free 'body' estimate."""
+        live = self.live
+        for ph in getattr(live, "phones", {}).values():
+            est = getattr(ph, "est", None)
+            if isinstance(est, dict) and est.get("x") is not None and est.get("kind") != "stale":
+                return float(est["x"]), float(est["y"])
+        body = getattr(live, "body", None)
+        if isinstance(body, dict) and body.get("x") is not None:
+            return float(body["x"]), float(body["y"])
+        return None
+
     def _tick_decoys(self, now):
-        """Advance the decoys inside the real room footprint. Called under self.lock from tick_loop."""
+        """Advance the decoys inside the real room footprint, gathered around the tracked person so they hide them.
+        Called under self.lock from tick_loop."""
         b = self._layout_bounds()
         if not b:
             self.decoys.set(False)
@@ -634,7 +648,11 @@ class App:
             return
         x0, y0, x1, y1 = b
         self._decoy_origin = (x0, y0)
-        self.decoys.tick(now, (max(x1 - x0, 0.5), max(y1 - y0, 0.5)))
+        center = None
+        c = self._tracked_center()
+        if c is not None:
+            center = (c[0] - x0, c[1] - y0)     # into the crowd's 0..w / 0..d frame
+        self.decoys.tick(now, (max(x1 - x0, 0.5), max(y1 - y0, 0.5)), center=center)
 
     def _decoy_snapshot(self):
         """Decoys in the layout metre frame (offset into the room), each flagged sim for the UI to label."""

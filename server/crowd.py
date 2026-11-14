@@ -26,6 +26,8 @@ DEFAULT_COUNT = 8        # decoys when the crowd is on
 SPEED = 0.7              # m/s, a slow indoor walk
 TURN = 0.6              # rad/s, how sharply a decoy changes direction
 EDGE_MARGIN = 0.3        # m, keep decoys this far inside the room
+CLUSTER_R = 1.4          # m, decoys gather within this radius of the real person so the person blends in
+CLUSTER_STEER = 0.55     # how strongly a stray decoy turns back toward the person (0..1)
 
 
 class CrowdState(enum.Enum):
@@ -41,9 +43,15 @@ class Decoy:
         self.heading = rng.uniform(-math.pi, math.pi)
         self._rng = rng
 
-    def step(self, dt, w, d, room=None):
+    def step(self, dt, w, d, room=None, center=None):
         prev_x, prev_y = self.x, self.y
-        self.heading += self._rng.uniform(-TURN, TURN) * dt
+        # When there's a real person to hide, a stray decoy turns back toward them so the crowd stays around the
+        # person (move with the crowd -> you stay lost in it). Otherwise it just wanders.
+        if center is not None and math.hypot(self.x - center[0], self.y - center[1]) > CLUSTER_R:
+            toward = math.atan2(center[1] - self.y, center[0] - self.x)
+            self.heading += CLUSTER_STEER * math.atan2(math.sin(toward - self.heading), math.cos(toward - self.heading))
+        else:
+            self.heading += self._rng.uniform(-TURN, TURN) * dt
         self.x += math.cos(self.heading) * SPEED * dt
         self.y += math.sin(self.heading) * SPEED * dt
         # Bounce off the bounding walls so decoys stay in the room.
@@ -69,6 +77,7 @@ class Crowd:
         self._rng = random.Random(seed)
         self._decoys = []
         self._last_t = None
+        self._center = None       # last known position of the real person the crowd is hiding
 
     def set(self, on):
         """The one transition: OFF <-> ON. Accepts a bool, 0/1, or a CrowdState."""
@@ -86,6 +95,7 @@ class Crowd:
         if self.state is CrowdState.OFF:
             self._decoys = []
             self._last_t = t
+            self._center = None
             return
         if not self._decoys:
             self._decoys = [Decoy(i, w, d, self._rng) for i in range(self.count)]
@@ -101,8 +111,17 @@ class Crowd:
                 dec.x, dec.y = spot or rm.random_point(self._rng)
         dt = 0.0 if self._last_t is None else max(0.0, min(t - self._last_t, 1.0))
         self._last_t = t
+        # If the real person moved, carry the whole crowd along with them, so they keep surrounding the person
+        # instead of being left behind. Then each decoy wanders/steers within the cluster.
+        if center is not None and self._center is not None:
+            shift_x, shift_y = center[0] - self._center[0], center[1] - self._center[1]
+            if abs(shift_x) < 2.0 and abs(shift_y) < 2.0:   # ignore teleport-sized jumps (bad estimates)
+                for dec in self._decoys:
+                    dec.x += shift_x
+                    dec.y += shift_y
+        self._center = center
         for dec in self._decoys:
-            dec.step(dt, w, d, room=rm)
+            dec.step(dt, w, d, room=rm, center=center)
 
     def snapshot(self):
         """Decoys for the snapshot. Empty when off. Every entry is flagged sim:True for the UI to label."""
