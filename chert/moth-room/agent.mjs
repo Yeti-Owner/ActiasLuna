@@ -5,6 +5,30 @@ import * as openai from '@livekit/agents-plugin-openai';
 import { runAgent } from './chert-rooms.mjs';
 import { greetOnBridgeReady } from './greet.mjs';
 import { instructionsFor, todayInTz, tools } from './moth-tools.mjs';   // room-history tools
+import { LocalVideoTrack, TrackSource, VideoBufferType, VideoFrame, VideoSource } from '@livekit/rtc-node';
+import { FPS, HEIGHT, WIDTH, loadScreen } from './screen.mjs';     // the moth the caller sees
+
+// Publish the moth as the agent's camera (Chert shows video only from the participant that speaks = this agent).
+// Any failure is logged and the call goes on as voice only.
+async function startScreen(ctx, log) {
+  try {
+    const draw = await loadScreen();
+    const source = new VideoSource(WIDTH, HEIGHT);
+    const track = LocalVideoTrack.createVideoTrack('actias-moth', source);
+    let tick = 0;
+    const state = { speaking: false };
+    const frame = () => source.captureFrame(new VideoFrame(draw(tick++, state.speaking), WIDTH, HEIGHT, VideoBufferType.RGBA));
+    frame();
+    await ctx.room.localParticipant.publishTrack(track, { source: TrackSource.SOURCE_CAMERA });
+    const timer = setInterval(() => { try { frame(); } catch { /* skip a frame */ } }, 1000 / FPS);
+    ctx.addShutdownCallback(async () => { clearInterval(timer); await track.close(); await source.close(); });
+    log('screen on');
+    return state;
+  } catch (e) {
+    log('screen failed (voice still works):', e?.message || String(e));
+    return { speaking: false };
+  }
+}
 
 // The agent's voice brain: Gemini when GOOGLE_API_KEY is set (free tier at aistudio.google.com), else OpenAI.
 function voiceBrain() {
@@ -22,13 +46,14 @@ const agent = defineAgent({
     // Chert prepares a room before a caller exists. Join promptly so Chert can find us, but wait before opening a
     // paid model session. Doctor jobs may end without a caller ever joining.
     const caller = await ctx.waitForParticipant();
+    const log = (...a) => console.log(JSON.stringify({ time: Date.now(), msg: `MOTH ${a.join(' ')}` }));
+    const screen = await startScreen(ctx, log);
     const session = new voice.AgentSession({
       llm: voiceBrain(),
     });
     ctx.addShutdownCallback(() => session.close());
-    // Diagnostics only (no behaviour change): log when the agent speaks/listens, so a call's log shows it talked.
-    const log = (...a) => console.log(JSON.stringify({ time: Date.now(), msg: `MOTH ${a.join(' ')}` }));
-    session.on('agent_state_changed', ev => log('agent', ev.oldState, '->', ev.newState));
+    // Diagnostics: log when the agent speaks/listens, so a call's log shows it talked. Also drives the moth's glow.
+    session.on('agent_state_changed', ev => { screen.speaking = ev.newState === 'speaking'; log('agent', ev.oldState, '->', ev.newState); });
     session.on('user_state_changed', ev => log('caller', ev.oldState, '->', ev.newState));
     session.on('error', ev => log('error', ev.error?.message || String(ev.error)));
     await session.start({
