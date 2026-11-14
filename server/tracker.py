@@ -47,8 +47,10 @@ RADIO_OFF_DB = 1.6
 RADIO_MIN_PKTS = 4
 RADIO_MIN_FRAMES = 6
 # Only the radio says moving while the phone says still: a slow walk, or a turn on the spot re-reading one fade, so
-# those readings count half.
+# those readings count half. Hand sway alone exceeds RADIO_ON_DB on 44% of standing ticks (vs 88% of walking ones,
+# measured on recorded marks and legs), so overruling the phone's "still" needs RADIO_OVERRULE_DB (2% of standing).
 RADIO_ONLY_STRENGTH = 0.5
+RADIO_OVERRULE_DB = 4.5
 STRIDE_M = 0.7
 RECEIVERS_S = 2.0
 # A window with this many packets from one board (a dwell) uses the median packet so a passer-by's brief shadow
@@ -145,6 +147,7 @@ class Phone:
         self.last_trail_t = 0.0
         self.steps_seen: Optional[int] = None
         self.radio_mv = -1
+        self.radio_db = 0.0
 
 
 class Tracker:
@@ -371,6 +374,7 @@ class Tracker:
             mean = sum(r for r, _ in rows) / len(rows)
             excess = sum((r - mean) ** 2 for r, _ in rows) / len(rows) - sum(se2 for _, se2 in rows) / len(rows)
             jitter.append(math.sqrt(max(0.0, excess)))
+        ph.radio_db = max(jitter, default=0.0)
         if len(jitter) < 2:
             ph.radio_mv = -1
         elif max(jitter) > RADIO_ON_DB:
@@ -542,17 +546,21 @@ class Tracker:
         facing = self._facing(mac, ctx) if use_motion else None
         steps = self._new_steps(ph, mac) if use_motion else 0
         # The radio may overrule the phone's "still" (phones miss slow walks); it never overrules "moving".
-        strength = 1.0
+        strength, creep = 1.0, True
         if st["radio_motion"] and mv != 1 and steps == 0:
             radio = self.radio_motion(ph, t)
+            if mv == 0 and radio == 1 and ph.radio_db <= RADIO_OVERRULE_DB:
+                radio = 0
             if mv == 0 and radio == 1:
-                strength = RADIO_ONLY_STRENGTH
+                # Can still be sway or a turn on the spot: weaken the dwell, but never creep along the compass on the
+                # radio's word alone.
+                strength, creep = RADIO_ONLY_STRENGTH, False
             if mv == -1 or radio == 1:
                 mv = radio
         extra = [FUSE_W * v for v in fuse] if fuse is not None else None
         result = ph.track.step(m, t, lambda t0, t1: self.window(ph, t0, t1), mv, steps, facing,
                                float(ctx.get("stride") or STRIDE_M), st["pdr"], st["shadow_guard"],
-                               strength=strength, extra=extra, holder_facing=facing)
+                               strength=strength, extra=extra, holder_facing=facing, creep=creep)
         ph.receivers = len(m.usable(self.window(ph, t - RECEIVERS_S, t)))
         if result:
             ph.raw = result

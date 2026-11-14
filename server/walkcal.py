@@ -24,7 +24,7 @@ from typing import List, Optional
 import radiomap as rmap
 import sensing
 
-VERSION = 1
+VERSION = 2
 STEP_S = 0.25
 WALK_WIN_S = 1.0
 MIN_DWELL_S = 1.0
@@ -41,7 +41,9 @@ TURN_S = 0.5
 BLOCK_WINDOWS = 4
 TAP_BEFORE_S = 1.5
 TAP_AFTER_S = 1.0
-STRIDE_MIN_M = 0.3
+# Metres per *counted* step, not per real stride: the hand-held detector in phone.js counts shuffles and sway on
+# short legs, which measured 0.11-0.23 m/count. Clamping to a walking stride made PDR overshoot those legs 2-3x.
+STRIDE_MIN_M = 0.1
 STRIDE_MAX_M = 1.1
 # Free legs between "I'm here" marks (leg_fit, motion_fit).
 LEG_MIN_M = 0.6
@@ -243,7 +245,7 @@ def _stride(legs: List[tuple]) -> Optional[float]:
     steps = sum(n for _, n in plausible)
     if steps < 10:
         return None
-    return min(1.0, max(0.4, sum(d for d, _ in plausible) / steps))
+    return min(STRIDE_MAX_M, max(STRIDE_MIN_M, sum(d for d, _ in plausible) / steps))
 
 
 def stride_fit(capture: dict):

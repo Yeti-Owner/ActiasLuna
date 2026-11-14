@@ -143,10 +143,11 @@ class Track:
         middle = sorted(changes)[len(changes) // 2]
         return max(abs(c - middle) for c in changes) > STILL_BREAK_DB
 
-    def _walking_move(self, t: float, dt: float, mv: int, steps: int, facing, stride: float, pdr: bool) -> Move:
+    def _walking_move(self, t: float, dt: float, mv: int, steps: int, facing, stride: float, pdr: bool,
+                      creep: bool) -> Move:
         if steps > 0:
             self.last_step_t = t
-        creeping = mv == 1 and steps <= 0 and (self.last_step_t is None or t - self.last_step_t > NOSTEP_S)
+        creeping = creep and mv == 1 and steps <= 0 and (self.last_step_t is None or t - self.last_step_t > NOSTEP_S)
         if steps > 0:
             dist = min(PDR_MAX_STEPS, steps) * stride
         elif creeping:
@@ -159,12 +160,14 @@ class Track:
 
     def step(self, m: "rmap.RadioMap", t: float, window: Window, mv: int = -1, steps: int = 0,
              facing: Optional[float] = None, stride: float = 0.7, pdr: bool = True, shadow: bool = False,
-             strength: float = 1.0, extra=None, holder_facing: Optional[float] = None) -> Optional[dict]:
+             strength: float = 1.0, extra=None, holder_facing: Optional[float] = None,
+             creep: bool = True) -> Optional[dict]:
         """Advance one tick and return radiomap's summary of the filtered belief (None before the first fix).
 
         window(t0, t1): this phone's readings in (t0, t1]. mv: 0 still, 1 moving, -1 unknown. steps: new steps since
         the last tick. facing: map angle walked towards, or None; pdr=False ignores steps. extra: another per-cell
-        log-likelihood on the same grid (sensing.DFMap). strength scales this update's weight.
+        log-likelihood on the same grid (sensing.DFMap). strength scales this update's weight. creep=False: "moving" without
+        steps holds position instead of creeping along the facing.
         """
         grid = m.grid
         if grid is None:
@@ -192,7 +195,7 @@ class Track:
             live = window(max(self.still_since, t - STILL_WIN_S), t)
         else:
             self.still_since = self.anchor = None
-            move = self._walking_move(t, dt, mv, steps, facing, stride, pdr)
+            move = self._walking_move(t, dt, mv, steps, facing, stride, pdr, creep)
             recent = self.meas_t is not None and t - self.meas_t <= WINDOW_MAX_S
             t0 = self.meas_t if recent else t - WINDOW_MAX_S
             due = self.belief is None or t - t0 >= MEAS_S - 1e-6
