@@ -18,6 +18,7 @@ DEFAULTS = {
     "holder_body": True,
     "device_free": False,
     "mark_anchor": True,
+    "camera": True,
 }
 
 INFO = {
@@ -75,6 +76,11 @@ INFO = {
         "Snap to \"I'm here\"",
         "When you mark where you stand on the phone page, your dot moves there and tracking carries on from that "
         "known spot.",
+    ),
+    "camera": (
+        "Laptop camera helps",
+        "Sharpens the dots of joined phones using people the laptop camera sees (place it on the /camera page). The "
+        "camera never adds anyone of its own.",
     ),
 }
 

@@ -13,6 +13,7 @@ Used by server/tracker.py:
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -51,6 +52,13 @@ HEIGHT_REL_SD = 0.1       # spread of standing head heights, relative (about 17 
 # so this is what tells a person from a pet or a rolling chair.
 MIN_HEIGHT_REL = 0.45     # shorter than this is not a person (pet, chair, bag); sitting is about 0.7
 MAX_HEIGHT_REL = 1.35     # taller than this means the bottom isn't the floor (a desk edge hides the legs): use the head
+# Bearing: when the feet aren't seen, use only the direction to the person (any visible part gives it) and let the
+# radio decide how far along that line they are. Needs the camera's floor position (pose, camera_xy or head_range).
+# Replaces the head-height guess, which is wrong for anyone sitting or of another height.
+BEARING = True
+BEARING_SD_DEG = 3.0      # direction noise: box-centre jitter plus the box centre sitting off the body's middle
+# Scanned objects at least this tall hide a whole person, so the bearing line stops at them; desks and chairs don't.
+OCCLUDER_MIN_H_M = 1.8
 
 
 @dataclass
@@ -60,8 +68,37 @@ class Detection:
     cov: np.ndarray    # 2x2 floor covariance, m^2
     score: float
     rt: float
-    # "feet": foot point (floor mapping); "range": head size + left/right (headrange.py); "head": head top (head mapping)
+    # "feet": foot point (floor mapping); "range": head size + left/right (headrange.py); "head": head top (head
+    # mapping); "bearing": direction only, x/y is then the camera's floor position and cov is unused
     kind: str = "feet"
+    bearing: Optional[float] = None   # map angle (radians) from the camera, "bearing" only
+
+
+def _wrap(a):
+    return (a + np.pi) % (2 * np.pi) - np.pi
+
+
+def _inside(x, y, poly):
+    inside = False
+    for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1]):
+        if (y0 > y) != (y1 > y) and x < x0 + (y - y0) * (x1 - x0) / (y1 - y0):
+            inside = not inside
+    return inside
+
+
+def _camera_xy(calibration):
+    """The camera's floor position from a calibration record, or None."""
+    if not isinstance(calibration, dict):
+        return None
+    for got in ((calibration.get("pose") or {}).get("x"), (calibration.get("pose") or {}).get("y")), \
+            tuple(calibration.get("camera_xy") or ()), tuple((calibration.get("head_range") or {}).get("cam") or ()):
+        try:
+            x, y = float(got[0]), float(got[1])
+        except (IndexError, TypeError, ValueError):
+            continue
+        if np.isfinite(x) and np.isfinite(y):
+            return x, y
+    return None
 
 
 class CameraFusion:
@@ -69,6 +106,10 @@ class CameraFusion:
         self.H = None            # floor mapping: image foot point -> floor
         self.Hh = None           # head mapping: image head top -> floor spot below it (optional)
         self.range = None        # head-size ranging from camera/head_setup.py (optional; works without H)
+        self.cam_xy = None       # camera floor position, for bearings
+        self._scene = None       # (polygon, occluder footprints) from set_scene
+        self._segs = np.zeros((0, 4))
+        self._vis = None         # (grid_x, cam_xy, segs id, visible mask) for loglik
         self.packet = None       # latest raw `cam` packet; projected when used, so a new calibration applies at once
         self.last_rt = None
         self.last_used = 0
@@ -90,7 +131,73 @@ class CameraFusion:
         rng = calibration.get("head_range") if isinstance(calibration, dict) else None
         valid = isinstance(rng, dict) and rng.get("k") and rng.get("f", 0) > 0 and len(rng.get("cam") or []) == 2
         self.range = rng if valid else None
+        self.cam_xy = _camera_xy(calibration) if self.calibrated else None
         self._cache = None
+        self._scene = None   # walls count only when the camera is inside the room, so rebuild against the new spot
+
+    def set_scene(self, polygon, objects):
+        """Room outline and scanned objects ({"footprint", "height"}), for cutting bearing lines at what hides people.
+        Cheap when unchanged, so it can be called every tick."""
+        poly = [tuple(map(float, p)) for p in polygon or [] if len(p) >= 2]
+        tall = [[tuple(map(float, p)) for p in o.get("footprint") or []] for o in objects or []
+                if isinstance(o, dict) and float(o.get("height") or 0) >= OCCLUDER_MIN_H_M]
+        scene = (poly, [fp for fp in tall if len(fp) >= 3])
+        if scene == self._scene:
+            return
+        self._scene = scene
+        segs = []
+        if self.cam_xy is not None:
+            cx, cy = self.cam_xy
+            # A camera placed on or outside a wall would see every cell through it: then walls don't occlude.
+            rings = ([poly] if len(poly) >= 3 and _inside(cx, cy, poly) else [])
+            rings += [fp for fp in scene[1] if not _inside(cx, cy, fp)]
+            for ring in rings:
+                segs += [(x0, y0, x1, y1) for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1])]
+        self._segs = np.array(segs, float).reshape(-1, 4)
+        self._vis = None
+
+    def visible(self, gx, gy):
+        """True where the straight line from the camera to the point crosses no wall or tall object."""
+        px, py = np.asarray(gx, float), np.asarray(gy, float)
+        if self.cam_xy is None or not len(self._segs):
+            return np.ones(px.shape, bool)
+        cx, cy = self.cam_xy
+        ax, ay, bx, by = (self._segs[:, i] for i in range(4))
+        px, py = px[..., None], py[..., None]
+
+        def side(x0, y0, x1, y1, x, y):
+            return (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0)
+
+        crosses = ((side(cx, cy, px, py, ax, ay) * side(cx, cy, px, py, bx, by) < 0)
+                   & (side(ax, ay, bx, by, cx, cy) * side(ax, ay, bx, by, px, py) < 0))
+        return ~crosses.any(axis=-1)
+
+    def _bearing(self, d):
+        """Map angle from the camera to a detection, from its box centre (else head top, else feet), or None.
+
+        Every image point on a person lies in the upright plane through the camera and that person, and the floor
+        mapping sends it to where its sight line crosses the floor: on the line from the camera's floor spot towards
+        the person, or behind the camera for points above the horizon (then the direction flips).
+        """
+        if not BEARING or self.H is None or self.cam_xy is None:
+            return None
+        pts = []
+        try:
+            pts.append((float(d["bx"]) + float(d["bw"]) / 2, float(d["by"]) + float(d["bh"]) / 2))
+        except (KeyError, TypeError, ValueError):
+            pass
+        pts += [p for p in (self._point(d, "hu", "hv"), self._point(d, "u", "v")) if p]
+        cx, cy = self.cam_xy
+        for u, v in pts:
+            p = self.H @ np.array([u, v, 1.0])
+            if abs(p[2]) <= 1e-12:
+                continue
+            dx, dy = p[0] / p[2] - cx, p[1] / p[2] - cy
+            if p[2] < 0:
+                dx, dy = -dx, -dy
+            if dx * dx + dy * dy > 1e-12:
+                return float(np.arctan2(dy, dx))
+        return None
 
     @property
     def calibrated(self):
@@ -186,7 +293,8 @@ class CameraFusion:
                     continue            # too short to be a person
                 if ratio is not None and ratio > MAX_HEIGHT_REL:
                     feet = None         # its "bottom" is a desk edge or similar, not the floor: trust the head
-            # Preference: feet (no guess at all), then head size (guesses head size, works sitting), then head height.
+            # Preference: feet (no guess at all), then head size (guesses head size, works sitting), then direction
+            # only (no guess), then head height (guesses height and standing).
             got, kind = None, "feet"
             if feet and self.H is not None:
                 got = self._from_feet(*feet, aspect)
@@ -195,6 +303,11 @@ class CameraFusion:
                 located = headrange.locate(self.range, *obs) if obs else None
                 if located:
                     got, kind = (located[0], np.array(located[1])), "range"
+            if got is None:
+                b = self._bearing(d)
+                if b is not None:
+                    out.append(Detection(self.cam_xy[0], self.cam_xy[1], None, s, rt, "bearing", b))
+                    continue
             if got is None and head and self.Hh is not None:
                 got, kind = self._from_head(*head, aspect), "head"
             if got is None:
@@ -229,10 +342,14 @@ class CameraFusion:
         dets = self.detections(t)
         dist = {}
         for k, (x, y, unc) in tracks.items():
+            sd = max(float(unc), MIN_TRACK_SD_M)
             for i, det in enumerate(dets):
-                S = det.cov + np.eye(2) * max(float(unc), MIN_TRACK_SD_M) ** 2
-                d = np.array([det.x - x, det.y - y])
-                m = float(np.sqrt(d @ np.linalg.solve(S, d)))
+                if det.kind == "bearing":
+                    m = self._bearing_sigmas(det, x, y, sd)
+                else:
+                    S = det.cov + np.eye(2) * sd ** 2
+                    d = np.array([det.x - x, det.y - y])
+                    m = float(np.sqrt(d @ np.linalg.solve(S, d)))
                 if m <= GATE_SIGMAS:
                     dist[i, k] = GATE_SIGMAS ** 2 - m * m
         order = [k for k in tracks if any((i, k) in dist for i in range(len(dets)))]
@@ -263,13 +380,41 @@ class CameraFusion:
         self.last_used = len(out)
         return out
 
+    @staticmethod
+    def _bearing_sigmas(det, x, y, sd):
+        """How many sigmas the point (x, y), known to sd metres, lies off a bearing line; inf behind the camera."""
+        dx, dy = x - det.x, y - det.y
+        r = float(np.hypot(dx, dy))
+        delta = abs(float(_wrap(np.arctan2(dy, dx) - det.bearing)))
+        if r < 1e-6 or delta > np.pi / 2:
+            return np.inf
+        ang_sd = np.sqrt(np.radians(BEARING_SD_DEG) ** 2 + (sd ** 2 + MIN_SIGMA_M ** 2) / (r * r))
+        return delta / ang_sd
+
+    def _bearing_loglik(self, det, grid_x, grid_y):
+        gx, gy = np.asarray(grid_x, float), np.asarray(grid_y, float)
+        dx, dy = gx - det.x, gy - det.y
+        r = np.maximum(np.hypot(dx, dy), 0.1)
+        delta = _wrap(np.arctan2(dy, dx) - det.bearing)
+        # Near the camera the line is never thinner than MIN_SIGMA_M across.
+        m = delta ** 2 / (np.radians(BEARING_SD_DEG) ** 2 + (MIN_SIGMA_M / r) ** 2)
+        like = np.where(np.abs(delta) < np.pi / 2, np.exp(-0.5 * m), 0.0)
+        v = self._vis
+        if v is None or v[0] is not grid_x or v[1] != self.cam_xy or v[2] is not self._segs:
+            v = self._vis = (grid_x, self.cam_xy, self._segs, self.visible(gx, gy))
+        like = np.where(v[3], like, 0.0)   # the person seen can't be behind a wall or a wardrobe
+        return WEIGHT * np.log((1.0 - OUTLIER) * like + OUTLIER)
+
     def loglik(self, det, grid_x, grid_y):
         """Log-likelihood of each grid cell given a matched detection; 0 at the detection, WEIGHT*log(OUTLIER) far.
 
-        grid_x, grid_y: arrays of cell-centre coordinates in metres (any matching shape).
+        grid_x, grid_y: arrays of cell-centre coordinates in metres (any matching shape). A bearing is 0 along its
+        line, up to the first wall or tall object.
         """
         if det is None:
             return np.zeros(np.shape(grid_x))
+        if det.kind == "bearing":
+            return self._bearing_loglik(det, grid_x, grid_y)
         inv = np.linalg.inv(det.cov)
         dx = np.asarray(grid_x, float) - det.x
         dy = np.asarray(grid_y, float) - det.y
@@ -284,4 +429,5 @@ class CameraFusion:
                 "floor_calibrated": self.H is not None, "range_calibrated": self.range_calibrated, "age": age,
                 # Placed from the head (size or height) because no usable feet were seen.
                 "seen": len(dets), "seen_by_head": sum(1 for d in dets if d.kind in ("head", "range")),
-                "used": self.last_used}
+                # Direction only: feet hidden, so the radio decides the distance.
+                "seen_by_bearing": sum(1 for d in dets if d.kind == "bearing"), "used": self.last_used}

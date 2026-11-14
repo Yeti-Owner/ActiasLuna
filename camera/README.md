@@ -2,8 +2,8 @@
 
 Uses the laptop's webcam to sharpen the positions of **phones that joined the demo network**. The camera never adds
 people of its own: a detection only counts when it clearly belongs to a phone that is already tracked, and every
-other detection is dropped. It has no setting and nothing on the dashboard: it helps whenever
-`data/camera/calibration.json` exists and the camera is sending (`tracker.CAMERA_HELP` switches it off).
+other detection is dropped. It helps whenever `data/camera/calibration.json` exists and the camera is sending; the
+**Laptop camera helps** setting (dashboard, or the switch on /camera) turns that off while the camera keeps running.
 
 **Set it up:** open http://127.0.0.1:8080/camera (not linked from the dashboard), click where the laptop is, click
 where its camera looks, pick its height, press **Save**. The server then starts `luna_camera.py` itself (log in
@@ -15,7 +15,10 @@ toe. Redo it if the laptop moves; **Remove camera** turns it off.
 1. **`luna_camera.py`** (on the laptop) finds people in each frame and works out where their feet touch the image
    and where the top of their head is. Every 250 ms it sends just those points to the server's UDP port as a `cam`
    packet. Frames are never saved or sent; only points (as fractions of the frame), box size and a confidence
-   score leave the process.
+   score leave the process. The one exception is the /camera page's live picture: while that page is open the
+   process keeps the latest annotated frame in memory and serves it on 127.0.0.1 only (`PREVIEW_PORT`, relayed by
+   the server's `/api/camera/preview.jpg`), so it never reaches the demo Wi-Fi. One person often fires several
+   detectors (body, head and shoulders, face, moving blob); boxes overlapping by `MERGE_OVERLAP` are sent once.
 2. **`homography.py`** maps image points to floor metres. **`pose.py`** builds the mappings from the /camera page's
    two clicks: position and facing from the clicks, height from the preset, a typical webcam field of view
    (`HFOV_DEG`), and a pitch that `refine` fits from whole-body sightings (only the right tilt makes everyone the
@@ -23,8 +26,13 @@ toe. Redo it if the laptop moves; **Remove camera** turns it off.
    `head_setup.py` below are slower manual alternatives. There are two mappings:
    - **Feet:** a foot point is on the floor, so it maps straight to where the person stands. Used whenever the
      feet are in view.
-   - **Head (fallback):** when a desk or the frame edge hides the feet, the top of the head maps to the floor spot
-     below it. This assumes the person is as tall as whoever calibrated; someone taller or shorter is placed a bit
+   - **Bearing (feet hidden):** when a desk or the frame edge hides the feet, only the *direction* from the laptop is
+     used (from the box centre, so any visible part of the person works, face or not, sitting or standing). The
+     radio decides how far along that line the person is. The line stops at walls (when the laptop is inside the
+     room) and at scanned objects at least `OCCLUDER_MIN_H_M` tall; desks and chairs don't hide anyone. Needs the
+     camera's floor spot: the /camera page's pose, `camera_xy`, or head-size ranging's `cam`.
+   - **Head (fallback, only without the camera's floor spot or with `BEARING` off):** the top of the head maps to
+     the floor spot below it. This assumes the person is as tall as whoever calibrated; someone taller or shorter is placed a bit
      too far or too near along the camera's line of sight.
 3. **`fusion.py`** (imported by `server/tracker.py`) turns each detection into a floor position with an uncertainty,
    then matches it to at most one phone:
@@ -108,8 +116,12 @@ Detection runs at most `DETECT_FPS` (8) times a second on `CV_THREADS` (2) threa
 a second, and uncapped detection takes every core and slows the server on the same laptop.
 
 **Detectors:**
-- **`combined`** (default) uses the people detectors below, plus anything that moves. A moving thing that overlaps
-  a person detection is the same person; the rest (odd poses, half hidden, side-on) are added.
+- **`combined`** (default) runs whole bodies, heads and shoulders, front and side-on faces, and anything that moves,
+  then keeps only people (`PersonTracks`). A candidate counts once it is found in 2 of the last 3 frames and someone
+  vouched for it in the last 10 s: a face, a strong whole body, or head and shoulders that are moving. Moving blobs
+  and lone head-and-shoulders boxes only carry a person already vouched for (turned away, side-on), so walls, doors
+  and things walked past are dropped. Head and shoulders are what's sent: from a table the feet are rarely in view,
+  and a body box's bottom is usually the table edge. The /camera preview shows dropped candidates in grey.
 - **`moving`** treats anything that moves as a candidate person, whatever its shape. Blobs are followed from frame
   to frame:
   - **Counting:** a blob counts once it has been seen for 3 detections in a row and has moved. Lighting flicker,
@@ -156,13 +168,14 @@ a real camera.
 
 | File | What it does |
 |---|---|
-| `server/tracker.py` | `cam` packets go to `CameraFusion.ingest` before receiver handling, so the camera never appears as a board. `_camera_tick` matches detections to the radio-only estimates of phones in the ESTIMATED or WEAK state; `_phone_tick` steps `radio_track` and adds the match to `extra`. `CAMERA_HELP` is the off switch. |
+| `server/tracker.py` | `cam` packets go to `CameraFusion.ingest` before receiver handling, so the camera never appears as a board. `_camera_tick` matches detections to the radio-only estimates of phones in the ESTIMATED or WEAK state; `_phone_tick` steps `radio_track` and adds the match to `extra`. The `camera` setting is the off switch. |
 | `server/luna_server.py` | `camera_calib()` loads `data/camera/calibration.json` (reloaded when it changes) into `ctx["camera"]`. |
 | `server/lab.py` | Passes the calibration to replays, so the lab scores tracking with and without the camera. |
 | Recordings | `cam` packets are ordinary UDP packets, so they are recorded and replayed with everything else. Detections are projected when used, so a new calibration also applies to old recordings. |
 
-The snapshot gains `"camera": {"calibrated", "head_calibrated", "age", "seen", "seen_by_head", "used"}` (or `null`
-with no camera) and each phone's `est.camera` (`"feet"` / `"range"` / `"head"` or `null`). The dashboard doesn't
+The snapshot gains `"camera": {"calibrated", "head_calibrated", "age", "seen", "seen_by_head", "seen_by_bearing",
+"used"}` (or `null` with no camera) and each phone's `est.camera` (`"feet"` / `"range"` / `"bearing"` / `"head"` or
+`null`). The dashboard doesn't
 render either. Counts only, never positions of people the camera sees. `seen_by_head` counts the people placed by
 their head because their feet were hidden.
 
@@ -187,6 +200,9 @@ which is the module the tracker imports.
 | `HEIGHT_REL_SD` | 0.1 | Spread of standing head heights, relative to the calibrator's (about 17 cm at 1.7 m) |
 | `MIN_HEIGHT_REL` | 0.45 | Anything shorter, relative to the calibrator, is not a person |
 | `MAX_HEIGHT_REL` | 1.35 | Anything taller has its bottom hidden: the head is used instead of the feet |
+| `BEARING` | True | Feet hidden: use direction only (off: the old head-height guess) |
+| `BEARING_SD_DEG` | 3.0 | Direction noise of a bearing |
+| `OCCLUDER_MIN_H_M` | 1.8 | Scanned objects this tall cut bearing lines |
 
 The moving-object constants are in `luna_camera.py`: `MOVE_MIN_FRAMES` (3), `MOVE_MIN_SHIFT` (0.02 of the frame
 width), `MOVE_HOLD_S` (20 s), `MOVE_BG_LEARN` (0.003, slower means a still person fades later but a moved chair

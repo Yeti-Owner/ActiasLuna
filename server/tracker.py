@@ -36,9 +36,8 @@ LINK_ALPHA = 0.02
 STATUS_HOLD_S = 1.5
 DEMO_UNC_SCALE = 0.75
 WALK_MAX_S = 600.0
-# Laptop camera (camera/): not a user setting and never shown. It only sharpens joined phones it clearly matches,
-# and does nothing until camera/luna_camera.py is sending and data/camera/calibration.json exists.
-CAMERA_HELP = True
+# Laptop camera (camera/), switched by the "camera" setting. It only sharpens joined phones it clearly matches, and
+# does nothing until camera/luna_camera.py is sending and data/camera/calibration.json exists.
 # A camera silent this long counts as gone: Phone.radio_track stops and resets.
 CAMERA_LIVE_S = 3.0
 # Each link keeps a fast level beside its slow baseline. While the fast level is LINK_DROP_DB below the baseline
@@ -195,6 +194,7 @@ class Tracker:
         # Per-window RSSI statistic used for phones: "r" (mean) or "q3" (upper quartile). Set from settings each tick.
         self.rssi_key = "r"
         self.camera = CameraFusion()
+        self.camera_help = True   # settings "camera", copied each tick
         self._camera_cal = None
         self._camera_match: Dict[str, object] = {}
         # mac -> rt of the camera packet last fused into that phone: a packet outlives several ticks (MAX_AGE_S), and
@@ -598,7 +598,8 @@ class Tracker:
         ph.est = {"x": x, "y": y, "unc": unc, "raw": [round(raw["x"], 3), round(raw["y"], 3), round(raw["unc"], 3)],
                   "receivers": ph.receivers, "mode": "calibrated" if m.spots else "uncalibrated",
                   "kind": ph.status.value, "age": age, "t": t,
-                  # "feet" / "range" / "head" while the camera is sharpening this phone, else None. Not rendered.
+                  # "feet" / "range" / "bearing" / "head" while the camera is sharpening this phone, else None.
+                  # Not rendered.
                   "camera": det.kind if det is not None else None}
         self._trail(ph, m, t)
         return True
@@ -613,6 +614,7 @@ class Tracker:
         for mac in self.excluded() & self.phones.keys():   # tracked before it was known to be a board or the laptop
             del self.phones[mac]
         fuse = self.body_ll if st["fuse_body"] and len(self.phones) == 1 else None
+        self.camera_help = st["camera"]
         self._camera_tick(t, ctx)
         for mac in list(self.phones):
             if not self._phone_tick(mac, self.phones[mac], t, ctx, st, m, fuse):
@@ -620,7 +622,7 @@ class Tracker:
         self._capture_tick(t)
 
     def _camera_live(self, t: float) -> bool:
-        return (CAMERA_HELP and self.camera.calibrated and self.camera.last_rt is not None
+        return (self.camera_help and self.camera.calibrated and self.camera.last_rt is not None
                 and t - self.camera.last_rt <= CAMERA_LIVE_S)
 
     def _camera_tick(self, t: float, ctx: dict):
@@ -629,6 +631,7 @@ class Tracker:
         if cal is not self._camera_cal:
             self._camera_cal = cal
             self.camera.set_calibration(cal)
+        self.camera.set_scene((ctx.get("layout") or {}).get("polygon"), ctx.get("scan_objects"))
         self._camera_match = {}
         for mac in self._camera_used.keys() - self.phones.keys():
             del self._camera_used[mac]

@@ -23,6 +23,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(1, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -76,6 +77,9 @@ CAMERA_SIGHTINGS = 600
 # A sighting for the pitch fit: feet and head top of one confident whole-body or moving box, head above the feet.
 CAMERA_SIGHT_SCORE = 0.5
 CAMERA_SIGHT_DU = 0.05
+# camera/luna_camera.py serves its annotated picture here (luna_camera.PREVIEW_PORT); /api/camera/preview.jpg relays it
+# so the /camera page needs no second origin. Both ends stay on 127.0.0.1.
+CAMERA_PREVIEW_PORT = 8093
 
 FT = rmap.FT
 DEFAULT_LAYOUT = {
@@ -393,6 +397,7 @@ class App:
         return {"pose": cal.get("pose"), "manual": bool(cal) and cal.get("source") != "pose",
                 "status": cam.status(self.live.now) if cam.last_rt is not None else None,
                 "sightings": len(self.cam_sightings), "started": self.cam_proc is not None,
+                "help": bool(self.settings["camera"]),
                 "polygon": self.layout["polygon"], "receivers": self.layout.get("receivers", {}),
                 "objects": [{"label": o.get("label"), "footprint": o["footprint"]} for o in self.scan_objects]}
 
@@ -447,7 +452,8 @@ class App:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
             self.cam_proc = subprocess.Popen(
-                [sys.executable, str(ROOT / "camera" / "luna_camera.py"), "--port", str(self.args.udp_port)],
+                [sys.executable, str(ROOT / "camera" / "luna_camera.py"), "--port", str(self.args.udp_port),
+                 "--preview-port", str(CAMERA_PREVIEW_PORT)],
                 stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=flags)
             self._note("laptop camera started")
         except OSError as exc:
@@ -458,7 +464,9 @@ class App:
     def ctx(self) -> dict:
         return {"map": self.map, "settings": self.settings, "df": self.df_map, "layout": self.layout,
                 "objects": [o["footprint"] for o in self.scan_objects], "heading": self._headings(),
-                "stride": self.calib.get("stride"), "camera": self.camera_calib()}
+                "stride": self.calib.get("stride"), "camera": self.camera_calib(),
+                # With heights: tall ones hide people from the laptop camera (camera.fusion.set_scene).
+                "scan_objects": self.scan_objects}
 
     def start_spot(self, body: dict, phone: str, default_s: float, delay: float):
         """Standing calibrate/test capture from a request body; the caller checked nothing is running."""
@@ -1162,6 +1170,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/camera":
             with APP.lock:
                 return self._json(APP.camera_info())
+        if path == "/api/camera/preview.jpg":
+            try:
+                with urlopen(f"http://127.0.0.1:{CAMERA_PREVIEW_PORT}/preview.jpg", timeout=1.0) as r:
+                    return self._send(200, "image/jpeg", r.read())
+            except OSError:   # camera not running yet, or no frame since the page started asking
+                return self._json({"error": "no picture yet"}, 503)
         if path == "/api/crowd":   # toggles the decoys; ?on=1 / ?on=0 sets them
             on = self._query(url).get("on")
             state = APP.toggle_decoys() if on is None else APP.set_decoys(on in ("1", "true", "on"))

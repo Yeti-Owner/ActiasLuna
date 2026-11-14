@@ -351,7 +351,8 @@ def write_camera_calibration(path: Path, head=True, floor=True, head_range=True)
             feet_pts.append({"u": feet[0], "v": feet[1], "x": x, "y": y})
         if top:
             head_pts.append({"u": top[0], "v": top[1], "x": x, "y": y})
-    record = {"version": 1, "source": "sim_nodes"}
+    # The camera's floor spot: fusion needs it for bearings (direction only) when the feet are hidden.
+    record = {"version": 1, "source": "sim_nodes", "camera_xy": [0.05 * w, 0.05 * h]}
     if floor:
         record["points"] = feet_pts
         if head and len(head_pts) >= 4:

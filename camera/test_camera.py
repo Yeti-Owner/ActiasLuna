@@ -139,7 +139,8 @@ class FusionTest(unittest.TestCase):
     def test_status_has_no_positions(self):
         self.cam.ingest(self.packet((0.5, 0.8)), rt=10.0)
         self.assertEqual(set(self.cam.status(10.0)), {"calibrated", "head_calibrated", "floor_calibrated",
-                                                      "range_calibrated", "age", "seen", "seen_by_head", "used"})
+                                                      "range_calibrated", "age", "seen", "seen_by_head",
+                                                      "seen_by_bearing", "used"})
 
     def test_new_calibration_applies_to_held_packet(self):
         cam = fusion.CameraFusion(None)
@@ -243,6 +244,87 @@ class HeadTest(unittest.TestCase):
         self.detect({"hu": hu, "hv": hv})
         st = self.cam.status(5.0)
         self.assertEqual((st["seen"], st["seen_by_head"], st["head_calibrated"]), (1, 1, True))
+
+
+class BearingTest(unittest.TestCase):
+    """Feet hidden: only the direction from the camera is used; the radio decides the distance."""
+
+    CAM = (0.2, 0.2)   # pinhole()'s default camera spot
+
+    def setUp(self):
+        self.cam = fusion.CameraFusion(dict(head_calibration(), camera_xy=list(self.CAM)))
+
+    def upper(self, x, y):
+        """A head-and-shoulders find (no feet) of someone standing at (x, y)."""
+        cu, cv = pinhole(x, y, 1.3)
+        hu, hv = pinhole(x, y, CAL_HEAD_M)
+        return {"bx": cu - 0.03, "bw": 0.06, "by": cv - 0.08, "bh": 0.16, "hu": hu, "hv": hv, "s": 0.9, "k": "upper"}
+
+    def detect(self, *dets, rt=5.0):
+        self.cam.ingest({"t": "cam", "w": 640, "h": 480, "det": list(dets)}, rt)
+        return self.cam.detections(rt)
+
+    def angle(self, x, y):
+        return np.arctan2(y - self.CAM[1], x - self.CAM[0])
+
+    def test_feet_hidden_gives_direction(self):
+        det, = self.detect(self.upper(2.4, 2.9))
+        self.assertEqual(det.kind, "bearing")
+        self.assertAlmostEqual(det.bearing, self.angle(2.4, 2.9), delta=np.radians(1.0))
+
+    def test_sitting_person_keeps_the_right_direction(self):
+        det, = self.detect(dict(self.upper(3.0, 2.0), hv=pinhole(3.0, 2.0, 1.2)[1]))
+        self.assertAlmostEqual(det.bearing, self.angle(3.0, 2.0), delta=np.radians(1.5))
+
+    def test_feet_still_preferred(self):
+        x, y = 2.5, 2.5
+        u, v = pinhole(x, y, 0.0)
+        det, = self.detect(dict(self.upper(x, y), u=u, v=v, k="body"))
+        self.assertEqual(det.kind, "feet")
+
+    def test_off_falls_back_to_head(self):
+        old = fusion.BEARING
+        fusion.BEARING = False
+        try:
+            self.cam.set_calibration(dict(head_calibration(), camera_xy=list(self.CAM)))
+            det, = self.detect(self.upper(2.4, 2.9))
+            self.assertEqual(det.kind, "head")
+        finally:
+            fusion.BEARING = old
+
+    def test_no_camera_spot_no_bearing(self):
+        self.cam.set_calibration(head_calibration())
+        det, = self.detect(self.upper(2.4, 2.9))
+        self.assertEqual(det.kind, "head")
+
+    def test_matches_phone_anywhere_along_the_line_only(self):
+        self.detect(self.upper(2.4, 2.9))
+        far_on_line = (0.2 + 1.6 * 2.2, 0.2 + 1.6 * 2.7)
+        got = self.cam.assign({"on": (*far_on_line, 0.5), "off": (3.5, 0.6, 0.5)}, 5.0)
+        self.assertEqual(set(got), {"on"})
+
+    def test_loglik_follows_the_line_and_stops_at_tall_objects(self):
+        det, = self.detect(self.upper(2.4, 2.9))
+        top = fusion.WEIGHT * np.log(fusion.OUTLIER)
+        gx, gy = np.array([1.3, 2.4, 3.0, 2.4]), np.array([1.55, 2.9, 3.6, 0.5])
+        ll = self.cam.loglik(det, gx, gy)
+        self.assertGreater(ll[0], -0.5)
+        self.assertGreater(ll[1], -0.5)
+        self.assertAlmostEqual(ll[3], top, delta=0.1)
+        # A wardrobe between (2.4, 2.9) and (3.0, 3.6) hides the far cell; a table there wouldn't.
+        box = [[2.6, 3.1], [2.9, 3.1], [2.9, 3.4], [2.6, 3.4]]
+        self.cam.set_scene([[0, 0], [5, 0], [5, 4], [0, 4]], [{"footprint": box, "height": 0.8}])
+        self.assertGreater(self.cam.loglik(det, gx, gy)[2], -0.5)
+        self.cam.set_scene([[0, 0], [5, 0], [5, 4], [0, 4]], [{"footprint": box, "height": 2.0}])
+        ll = self.cam.loglik(det, gx, gy)
+        self.assertAlmostEqual(ll[2], top, delta=0.1)
+        self.assertGreater(ll[1], -0.5)
+
+    def test_walls_hide_the_next_room(self):
+        det, = self.detect(self.upper(2.4, 2.9))
+        # An L-shaped room: the cell at (3.0, 3.6) is round the corner from the camera.
+        self.cam.set_scene([[0, 0], [5, 0], [5, 4], [2.75, 4], [2.75, 3.2], [0, 3.2]], [])
+        np.testing.assert_array_equal(self.cam.visible(np.array([2.4, 3.0]), np.array([2.9, 3.6])), [True, False])
 
 
 class HeightCheckTest(unittest.TestCase):
@@ -388,6 +470,61 @@ class HeadRangeTest(unittest.TestCase):
         self.assertAlmostEqual(d.x, 2.2, delta=1e-6)
 
 
+class MergeTest(unittest.TestCase):
+    """One person firing several detectors is sent once."""
+
+    def test_body_upper_face_and_mover_of_one_person_collapse_to_head_and_shoulders(self):
+        # Head and shoulders win: from a table the "feet" of a body or moving box are usually the table edge.
+        found = [((100, 60, 40, 40), 0.6, "face"), ((80, 50, 90, 100), 0.5, "upper"),
+                 ((70, 40, 110, 300), 0.4, "body"), ((75, 45, 100, 290), 0.7, "moving")]
+        self.assertEqual([f[2] for f in luna_camera.merge_overlaps(found)], ["upper"])
+
+    def test_two_people_side_by_side_stay_two(self):
+        found = [((50, 40, 80, 300), 0.8, "body"), ((300, 40, 80, 300), 0.7, "body")]
+        self.assertEqual(len(luna_camera.merge_overlaps(found)), 2)
+
+    def test_face_away_from_everyone_is_kept(self):
+        found = [((50, 40, 80, 300), 0.8, "body"), ((400, 60, 30, 30), 0.6, "face")]
+        self.assertEqual(sorted(f[2] for f in luna_camera.merge_overlaps(found)), ["body", "face"])
+
+
+class PersonTracksTest(unittest.TestCase):
+    """Faces vouch for a person; walls, doors and blobs on their own never count."""
+
+    FACE = ((300, 60, 40, 40), 0.6, "face")
+    UPPER = ((280, 50, 90, 110), 0.5, "upper")
+    MOVER = ((270, 40, 110, 300), 0.7, "moving")
+    DOOR = ((20, 10, 60, 320), 0.7, "moving")
+    WALL = ((500, 30, 70, 80), 0.5, "upper")
+
+    def feed(self, frames, dt=0.125):
+        tracks, out = luna_camera.PersonTracks(), []
+        for i, found in enumerate(frames):
+            out.append([f[2] for f in tracks.update(found, i * dt)[0]])
+        return out
+
+    def test_face_counts_from_its_second_frame(self):
+        self.assertEqual(self.feed([[self.FACE, self.UPPER]] * 3), [[], ["upper"], ["upper"]])
+
+    def test_one_frame_fluke_never_counts(self):
+        self.assertEqual(self.feed([[self.FACE], [], [], []]), [[], [], [], []])
+
+    def test_lone_head_and_shoulders_or_mover_is_not_a_person(self):
+        self.assertEqual(self.feed([[self.WALL, self.DOOR]] * 5), [[]] * 5)
+
+    def test_turned_away_person_is_carried_after_a_face(self):
+        frames = [[self.FACE, self.UPPER]] * 2 + [[self.UPPER, self.MOVER]] * 10
+        self.assertEqual(self.feed(frames)[-1], ["upper"])
+
+    def test_carried_person_is_dropped_after_trust_runs_out(self):
+        steps = int(luna_camera.TRUST_S / 0.125) + 4
+        frames = [[self.FACE, self.UPPER]] * 2 + [[self.UPPER]] * steps
+        self.assertEqual(self.feed(frames)[-1], [])
+
+    def test_moving_head_and_shoulders_vouch_without_a_face(self):
+        self.assertEqual(self.feed([[self.UPPER, self.MOVER]] * 3)[-1], ["upper"])
+
+
 class PacketTest(unittest.TestCase):
     def test_body_has_feet_and_head(self):
         d = luna_camera.person_record((100, 50, 60, 200), 640, 480, 0.8)
@@ -438,6 +575,9 @@ class PoseTest(unittest.TestCase):
                 cam.ingest({"w": 640, "h": 360, "det": [det]}, 1.0)
                 got = cam.detections(1.0)
                 self.assertEqual(len(got), 1, (pitch, x, y))
+                if got[0].kind == "bearing":   # feet out of frame: direction only, from the pose's camera spot
+                    self.assertAlmostEqual(got[0].bearing, np.arctan2(y - 0.3, x - 0.3), delta=0.01)
+                    continue
                 self.assertAlmostEqual(got[0].x, x, delta=0.05)
                 self.assertAlmostEqual(got[0].y, y, delta=0.05)
 

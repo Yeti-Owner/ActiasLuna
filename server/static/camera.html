@@ -21,6 +21,10 @@ button:disabled { opacity: .45; cursor: default; }
 .dot.on { background: var(--acc); } .dot.wait { background: var(--warn); } .dot.bad { background: var(--bad); }
 .muted { color: var(--muted); }
 #msg { min-height: 1.4em; }
+#liveBox { margin-top: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+#live { display: block; width: 100%; height: auto; }
+#liveNote { padding: 8px 12px; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; }
 </style>
 </head>
 <body>
@@ -42,9 +46,17 @@ button:disabled { opacity: .45; cursor: default; }
     <span id="msg" class="muted"></span>
   </div>
   <div id="status">Loading…</div>
+  <div class="row"><label class="toggle"><input type="checkbox" id="help"> Camera helps tracking</label>
+    <span class="muted">Off: the camera keeps running here, but phones are tracked by radio alone.</span></div>
+  <div id="liveBox">
+    <img id="live" alt="" hidden>
+    <div id="liveNote" class="muted">What the camera sees appears here once it is running. Green box: one detection
+      sent to the server (red dot feet, blue dot head top). The picture stays on this laptop and is never saved.</div>
+  </div>
 </div>
 <script>
-// Coupled to server/luna_server.py (GET /api/camera, POST /api/camera/place|clear) and camera/pose.py: HFOV_DEG
+// Coupled to server/luna_server.py (GET /api/camera, /api/camera/preview.jpg, POST /api/camera/place|clear,
+// /api/settings key "camera") and camera/pose.py: HFOV_DEG
 // mirrors pose.HFOV_DEG so the drawn view matches the model. Metres in code, feet on screen.
 const HFOV_DEG = 68, FT = 0.3048, PAD = 1.0;
 const $ = (id) => document.getElementById(id);
@@ -126,7 +138,8 @@ function statusHtml() {
   if (!s || s.age == null || s.age > 3) return line("wait", info.started ? "Starting the camera… (allow camera access if Windows asks)" : "Waiting for the camera…");
   const tilt = info.pose ? `<br><span class="muted">Tilt ${info.pose.pitch_deg.toFixed(1)}°, fine-tuned from people seen head to toe ` +
     `(${info.sightings} so far).</span>` : "";
-  return line("on", `Camera live · sees ${s.seen} ${s.seen === 1 ? "person" : "people"} · helping ${s.used} phone${s.used === 1 ? "" : "s"}`) + tilt;
+  const helping = info.help ? `helping ${s.used} phone${s.used === 1 ? "" : "s"}` : "not helping (switched off)";
+  return line("on", `Camera live · sees ${s.seen} ${s.seen === 1 ? "person" : "people"} · ${helping}`) + tilt;
 }
 
 async function refresh() {
@@ -138,9 +151,24 @@ async function refresh() {
     if ([...$("height").options].some((o) => o.value === h)) $("height").value = h;
   }
   $("status").innerHTML = statusHtml();
+  $("help").checked = !!info.help;
   draw();
 }
 $("height").onchange = () => { $("save").disabled = !(cam && look); };
+$("help").onchange = async () => {
+  try { await post("/api/settings", { key: "camera", on: $("help").checked }); await refresh(); }
+  catch (e) { $("msg").textContent = e.message; }
+};
+
+// One request at a time, so a slow camera never piles them up; the camera only encodes frames while asked.
+const live = $("live");
+function nextFrame() {
+  if (document.hidden) return setTimeout(nextFrame, 1000);
+  live.src = "/api/camera/preview.jpg?" + Date.now();
+}
+live.onload = () => { live.hidden = false; $("liveNote").hidden = true; setTimeout(nextFrame, 250); };
+live.onerror = () => { live.hidden = true; $("liveNote").hidden = false; setTimeout(nextFrame, 1500); };
+nextFrame();
 window.addEventListener("resize", draw);
 refresh();
 setInterval(() => refresh().catch(() => { $("status").innerHTML = '<span class="dot bad"></span>Server not reachable.'; }), 2000);

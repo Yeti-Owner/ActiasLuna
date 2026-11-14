@@ -1,8 +1,9 @@
 """Laptop camera receiver for ActiasLuna.
 
 Finds people (and anything that moves) in the laptop camera and sends the ActiasLuna server only where each one's
-bottom touches the image and where its top is, as a `cam` UDP packet every 250 ms. Frames stay in memory for one
-detection pass and are never saved or sent.
+bottom touches the image and where its top is, as a `cam` UDP packet every 250 ms. Frames are never saved and never
+leave this laptop: the only picture is the annotated preview (Preview), kept in memory and served on 127.0.0.1 for the
+server's /camera page, and only encoded while that page is asking for it.
 
     python camera/luna_camera.py                    # people detectors + anything moving, to 127.0.0.1:<server_udp_port>
     python camera/luna_camera.py --preview          # also show a local window with the detections
@@ -21,7 +22,10 @@ import json
 import math
 import socket
 import sys
+import threading
 import time
+from collections import deque
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +41,32 @@ CV_THREADS = 2
 FACE_CROWN = 0.25      # a face box starts at the brow; the head top is about this many face heights above it
 UPPER_SCORE = 0.5      # Haar cascades give no usable confidence; these fixed scores rank them below a whole body
 FACE_SCORE = 0.6
+# One person often fires several detectors at once (whole body, head and shoulders, face, a moving blob). Boxes
+# sharing at least this much of the smaller one's area are one person, sent as the kind ranked first here. From a
+# laptop on a table the feet are almost never in view, so head and shoulders lead: only "body" and "moving" boxes
+# claim feet, and their bottom edge is usually the table, not the floor.
+MERGE_OVERLAP = 0.4
+KIND_RANK = {"upper": 0, "face": 1, "body": 2, "moving": 3}
+# Haar cascades and HOG fire on door frames, wall texture and posters. Stricter settings, plus minimum sizes as a
+# fraction of the frame height (anyone in the room looks at least this big from the laptop).
+UPPER_NEIGHBORS = 6
+UPPER_MIN_H = 0.12
+FACE_NEIGHBORS = 6
+FACE_MIN_H = 0.05
+HOG_MIN_WEIGHT = 0.5
+BODY_MIN_H = 0.25
+# A person is sent only after CONFIRM_HITS of the last CONFIRM_FRAMES detections found them (one-frame flukes never
+# count), and only while trusted: a face, a strong whole body (score >= BODY_TRUST_SCORE), or head and shoulders that
+# are also moving vouched for them in the last TRUST_S. Moving blobs and lone head-and-shoulders boxes only carry a
+# person someone vouched for (turned away, side-on), so a door swinging or a wall someone walked past is dropped.
+CONFIRM_HITS = 2
+CONFIRM_FRAMES = 3
+TRUST_S = 10.0
+BODY_TRUST_SCORE = 0.6
+# Preview for the /camera page. luna_server.CAMERA_PREVIEW_PORT passes the same port; 127.0.0.1 only.
+PREVIEW_PORT = 8093
+PREVIEW_IDLE_S = 3.0   # stop encoding frames this long after the page last asked
+PREVIEW_QUALITY = 70
 
 
 def person_record(box, frame_w, frame_h, score, kind="body"):
@@ -55,6 +85,24 @@ def person_record(box, frame_w, frame_h, score, kind="body"):
     if head_y > EDGE_PX:
         rec["hu"], rec["hv"] = cx, round(head_y / frame_h, 4)
     return rec if "u" in rec or "hu" in rec else None
+
+
+def _overlap(a, b):
+    """Shared area of boxes a, b (x, y, w, h) as a fraction of the smaller one's."""
+    w = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+    h = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+    small = min(a[2] * a[3], b[2] * b[3])
+    return w * h / small if w > 0 and h > 0 and small > 0 else 0.0
+
+
+def merge_overlaps(found):
+    """[(box, score, kind)] with each person kept once: overlapping boxes collapse to the most complete kind."""
+    kept = []
+    for f in sorted(found, key=lambda f: (KIND_RANK.get(f[2], 9), -f[1])):
+        if all(_overlap(f[0], k[0]) < MERGE_OVERLAP and not _inside(f[0], k[0], 0.0) and not _inside(k[0], f[0], 0.0)
+               for k in kept):
+            kept.append(f)
+    return kept
 
 
 def build_packet(cam_id, seq, up_ms, frame_w, frame_h, dets):
@@ -79,10 +127,11 @@ class HogDetector:
             return []
         boxes = [tuple(int(c) for c in r) for r in rects]
         scores = [float(w) for w in (weights.ravel() if hasattr(weights, "ravel") else weights)]
-        keep = self.cv2.dnn.NMSBoxes(boxes, scores, 0.0, 0.4)
+        keep = self.cv2.dnn.NMSBoxes(boxes, scores, HOG_MIN_WEIGHT, 0.4)
         keep = [int(i) for i in (keep.ravel() if hasattr(keep, "ravel") else keep)]
+        min_h = BODY_MIN_H * frame.shape[0]
         # HOG margins are unbounded; squash them into 0..1.
-        return [(boxes[i], 1.0 - math.exp(-max(scores[i], 0.0)), "body") for i in keep]
+        return [(boxes[i], 1.0 - math.exp(-max(scores[i], 0.0)), "body") for i in keep if boxes[i][3] >= min_h]
 
 
 def _inside(box, outer, margin=0.15):
@@ -102,20 +151,32 @@ class UpperDetector:
         base = Path(getattr(getattr(cv2, "data", None), "haarcascades", ""))
         self.upper = cv2.CascadeClassifier(str(base / "haarcascade_upperbody.xml"))
         self.face = cv2.CascadeClassifier(str(base / "haarcascade_frontalface_default.xml"))
+        # Side-on faces; the cascade finds faces turned one way, so the mirrored frame finds the other.
+        self.profile = cv2.CascadeClassifier(str(base / "haarcascade_profileface.xml"))
         if self.upper.empty() or self.face.empty():
             raise SystemExit("this OpenCV build has no bundled Haar cascades (cv2.data); use --detector hog")
+
+    def _faces(self, gray, size):
+        opts = {"scaleFactor": 1.1, "minNeighbors": FACE_NEIGHBORS, "minSize": (size, size)}
+        found = [tuple(int(c) for c in b) for b in self.face.detectMultiScale(gray, **opts)]
+        if not self.profile.empty():
+            w = gray.shape[1]
+            found += [tuple(int(c) for c in b) for b in self.profile.detectMultiScale(gray, **opts)]
+            found += [(w - int(x) - int(bw), int(y), int(bw), int(bh))
+                      for x, y, bw, bh in self.profile.detectMultiScale(self.cv2.flip(gray, 1), **opts)]
+        return [f for i, f in enumerate(found) if not any(_overlap(f, g) >= MERGE_OVERLAP for g in found[:i])]
 
     def __call__(self, frame):
         cv2 = self.cv2
         gray = cv2.equalizeHist(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+        h = frame.shape[0]
+        up = max(24, int(UPPER_MIN_H * h))
         uppers = [tuple(int(c) for c in b) for b in
-                  self.upper.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(40, 40))]
-        faces = [tuple(int(c) for c in b) for b in
-                 self.face.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))]
-        out = [(b, UPPER_SCORE, "upper") for b in uppers]
-        # A face inside a head-and-shoulders box is the same person.
-        out += [(f, FACE_SCORE, "face") for f in faces if not any(_inside(f, u) for u in uppers)]
-        return out
+                  self.upper.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=UPPER_NEIGHBORS, minSize=(up, up))]
+        faces = self._faces(gray, max(20, int(FACE_MIN_H * h)))
+        # A face inside a head-and-shoulders box is the same person; both are kept, because the face is what vouches
+        # for it (PersonTracks), and merge_overlaps sends it once.
+        return [(b, UPPER_SCORE, "upper") for b in uppers] + [(f, FACE_SCORE, "face") for f in faces]
 
 
 class HybridDetector:
@@ -239,19 +300,73 @@ class MovingDetector:
         return [(box, score, "moving") for box, score, _ in movers]
 
 
+class PersonTracks:
+    """Decides which candidate boxes are people (pure Python, testable): see CONFIRM_HITS and TRUST_S.
+
+    Each frame's candidates from every detector are grouped by overlap, one group per person, and followed from frame
+    to frame by overlap.
+    """
+
+    def __init__(self):
+        self.tracks = []   # {"box", "hits": deque of bool, "group": this frame's candidates or None, "trusted": t}
+
+    @staticmethod
+    def _trusts(group):
+        kinds = {k for _, _, k in group}
+        return ("face" in kinds or any(k == "body" and s >= BODY_TRUST_SCORE for _, s, k in group)
+                or {"upper", "moving"} <= kinds)
+
+    def update(self, found, t):
+        """found: [(box, score, kind)] from all detectors. Returns (people, rejected), each [(box, score, kind)]."""
+        groups = []
+        for f in sorted(found, key=lambda f: (KIND_RANK.get(f[2], 9), -f[1])):
+            g = next((g for g in groups if _overlap(f[0], g[0][0]) >= MERGE_OVERLAP), None)
+            if g is None:
+                groups.append([f])
+            else:
+                g.append(f)
+        free = list(groups)
+        for tr in self.tracks:
+            g = max(free, key=lambda g: _overlap(g[0][0], tr["box"]), default=None)
+            if g is not None and _overlap(g[0][0], tr["box"]) < MERGE_OVERLAP:
+                g = None
+            tr["hits"].append(g is not None)
+            tr["group"] = g
+            if g is not None:
+                free.remove(g)
+                tr["box"] = g[0][0]
+        self.tracks = [tr for tr in self.tracks if any(tr["hits"])]
+        for g in free:
+            self.tracks.append({"box": g[0][0], "hits": deque([True], maxlen=CONFIRM_FRAMES), "group": g,
+                                "trusted": -math.inf})
+        people, rejected = [], []
+        for tr in self.tracks:
+            g = tr["group"]
+            if g is None:
+                continue
+            if self._trusts(g):
+                tr["trusted"] = t
+            ok = sum(tr["hits"]) >= CONFIRM_HITS and t - tr["trusted"] <= TRUST_S
+            (people if ok else rejected).append(g[0])
+        return people, rejected
+
+
 class CombinedDetector:
-    """People detectors (whole body, head and shoulders, face) plus anything moving. A mover overlapping a person
-    detection is the same person and is dropped; the rest (people in odd poses, half hidden, side-on) are added."""
+    """Whole bodies, heads and shoulders, faces and anything moving, filtered by PersonTracks: faces vouch for a
+    person; the rest only follow someone already vouched for. `rejected` keeps the last frame's dropped candidates
+    for the /camera preview."""
 
     def __init__(self, cv2):
-        self.people = HybridDetector(cv2)
+        self.body = HogDetector(cv2)
+        self.upper = UpperDetector(cv2)
         self.moving = MovingDetector(cv2)
+        self.people = PersonTracks()
+        self.rejected = []
 
     def __call__(self, frame):
-        people = self.people(frame)
-        movers = [m for m in self.moving(frame)
-                  if not any(_inside(m[0], p[0]) or _inside(p[0], m[0]) for p in people)]
-        return people + movers
+        found = self.body(frame) + self.upper(frame) + self.moving(frame)
+        people, self.rejected = self.people.update(found, time.monotonic())
+        return people
 
 
 DETECTORS = {"combined": CombinedDetector, "hybrid": HybridDetector, "moving": MovingDetector, "hog": HogDetector,
@@ -302,17 +417,20 @@ def detect(detector, frame):
     """Detection records (feet and/or head top) for one frame."""
     h, w = frame.shape[:2]
     out = []
-    for box, score, kind in detector(frame):
+    for box, score, kind in merge_overlaps(detector(frame)):
         d = person_record(box, w, h, score, kind)
         if d:
             out.append(d)
     return out
 
 
-def draw(cv2, frame, dets):
+def draw(cv2, frame, dets, rejected=()):
     """Preview: green box, red dot at the feet, blue dot at the head top (the server uses the head only when the
-    feet are missing)."""
+    feet are missing). Rejected candidates (pixel boxes) in thin grey."""
     h, w = frame.shape[:2]
+    for (x, y, bw, bh), _, kind in rejected:
+        cv2.rectangle(frame, (x, y), (x + bw, y + bh), (140, 140, 140), 1)
+        cv2.putText(frame, kind, (x, max(12, y - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (140, 140, 140), 1)
     for d in dets:
         x0, y0 = int(d["bx"] * w), int(d["by"] * h)
         x1, y1 = int((d["bx"] + d["bw"]) * w), int((d["by"] + d["bh"]) * h)
@@ -323,6 +441,58 @@ def draw(cv2, frame, dets):
             cv2.circle(frame, (int(d["hu"] * w), int(d["hv"] * h)), 5, (255, 120, 0), -1)
         cv2.putText(frame, f"{d['k']} {d['s']:.2f}", (x0, max(12, y0 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                     (0, 200, 0), 1)
+
+
+class Preview:
+    """Latest annotated frame as JPEG, for the /camera page only. Bound to 127.0.0.1, so nothing on the network (the
+    phones on the demo Wi-Fi included) can reach it; frames are encoded only while the page keeps asking."""
+
+    def __init__(self, port):
+        self.jpeg = None
+        self.asked = -math.inf
+        self.lock = threading.Lock()
+        preview = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, fmt, *args):
+                pass
+
+            def do_GET(self):
+                preview.asked = time.monotonic()
+                with preview.lock:
+                    body = preview.jpeg
+                if self.path.split("?")[0] != "/preview.jpg" or body is None:
+                    self.send_response(404 if body is not None else 503)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        self.server.daemon_threads = True
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def wanted(self):
+        if time.monotonic() - self.asked > PREVIEW_IDLE_S:
+            with self.lock:
+                self.jpeg = None   # page closed: don't keep a picture around
+            return False
+        return True
+
+    def put(self, cv2, frame, dets, rejected=()):
+        shown = frame.copy()
+        draw(cv2, shown, dets, rejected)
+        cv2.putText(shown, f"{len(dets)} sent", (8, shown.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                    (255, 255, 255), 2)
+        ok, buf = cv2.imencode(".jpg", shown, [cv2.IMWRITE_JPEG_QUALITY, PREVIEW_QUALITY])
+        if ok:
+            with self.lock:
+                self.jpeg = buf.tobytes()
 
 
 DEFAULT_UDP_PORT = 5007   # same fallback as server/luna_server.py when config/network.json is missing
@@ -347,6 +517,9 @@ def main(argv=None):
                          "only; upper: upper bodies/faces only; motion: moving person-shaped blobs, no memory")
     ap.add_argument("--id", default="cam:laptop", help="receiver id in packets")
     ap.add_argument("--preview", action="store_true", help="show a local window (never recorded or sent)")
+    ap.add_argument("--preview-port", type=int, default=PREVIEW_PORT,
+                    help=f"serve the annotated picture to the server's /camera page on 127.0.0.1 (default "
+                         f"{PREVIEW_PORT}, 0 = off)")
     args = ap.parse_args(argv)
 
     port = args.port or server_port()
@@ -357,6 +530,12 @@ def main(argv=None):
     cap = open_camera(cv2, args.camera)
     detector = DETECTORS[args.detector](cv2)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    preview = None
+    if args.preview_port:
+        try:
+            preview = Preview(args.preview_port)
+        except OSError as exc:
+            print(f"no /camera preview: port {args.preview_port} is taken ({exc})", flush=True)
     start = time.monotonic()
     next_send = start + WINDOW_S
     next_detect = start
@@ -386,6 +565,8 @@ def main(argv=None):
             if frame is not None:
                 size = (frame.shape[1], frame.shape[0])
                 dets, dets_at = detect(detector, frame), now
+                if preview and preview.wanted():
+                    preview.put(cv2, frame, dets, getattr(detector, "rejected", ()))
                 if args.preview:
                     draw(cv2, frame, dets)
                     cv2.imshow("luna camera (local only)", frame)
