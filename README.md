@@ -55,9 +55,10 @@ python server/luna_server.py                           # dashboard at http://127
 
 Join a phone to `DEMO-DONT JOIN`, open the phone page, mark a few spots with *I'm here*, and watch yourself move on the map.
 
-Have a textured room scan (.glb, or a .zip holding one)? `python tools/import_scan.py scan.zip --set-layout` measures
-the room outline and furniture from it, sizes the layout to match and puts the scan in the 3D view. Add
-`--rotate 1..3` if the scan's corner (0, 0) isn't the one your board positions are measured from.
+Have a textured room scan (.glb, or a .zip holding one)? On the dashboard open Setup → Room → *Import room scan*: it
+measures the room outline and furniture, sizes the layout to match and puts the scan in the 3D view. Press *Turn 90°*
+if the scan's corner (0, 0) isn't the one your board positions are measured from. (`python tools/import_scan.py
+scan.zip --set-layout [--rotate 1..3]` does the same from the command line.)
 
 No boards yet? Run `python tools/sim_nodes.py` and start the server with
 `--targets 127.0.0.1:6101,127.0.0.1:6102,127.0.0.1:6103`.

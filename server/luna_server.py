@@ -17,12 +17,15 @@ import sys
 import threading
 import time
 import traceback
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(1, str(Path(__file__).resolve().parents[1] / "tools"))
 
+import import_scan  # noqa: E402
 import lab  # noqa: E402
 import planner  # noqa: E402
 import radiomap as rmap  # noqa: E402
@@ -44,6 +47,7 @@ ORIENTATIONS = ("hand", "front_pocket", "back_pocket", "bag")
 EMPTY_LEAVE_S = 15.0
 EMPTY_S = 30.0
 SCAN_MATCH_M = 0.3
+SCAN_MAX_BYTES = 300 << 20
 BUSY = (409, "a capture is already running")
 # "I'm here": MARK_DELAY_S lets the hand settle after the tap, then MARK_S of standing readings. Stretches the phone
 # reports moving (MARK_MOVE_PAD_S either side, reports lag the motion) are dropped; under MARK_MIN_S left, or under 2
@@ -743,7 +747,8 @@ class App:
                          "packets": self.rec_count}
             extra = {"view": view, "layout": self.layout, "calib": self.calib_summary(), "recording": recording,
                      "phone_cal": {"pin": None, "port": self.phone_port, "https": self.phone_https},
-                     "settings": self.settings, "settings_info": cfg.INFO, "lab": self.lab,
+                     "settings": self.settings, "settings_info": cfg.INFO,
+                     "settings_defaults": cfg.DEFAULTS, "lab": self.lab,
                      "furniture_prior": bool(self.blocked), "ssid": self.net.get("ssid"), "wall": time.time()}
             replay = self.replay
             if replay:
@@ -947,8 +952,42 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return
 
+    def _scan_import(self, url):
+        """Raw .glb/.zip body (or none, to re-turn the stored scan); the heavy mesh work runs outside APP.lock."""
+        q = self._query(url)
+        # Not a CORS-safelisted type, so another web page can't post a file here without a preflight we never answer.
+        if self.headers.get("Content-Type") != "application/octet-stream":
+            return self._json({"error": "send the file as application/octet-stream"}, 415)
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length > SCAN_MAX_BYTES:
+            return self._json({"error": "scan file too large"}, 413)
+        old = read_json(DATA / "scan" / "room.json", {}) or {}
+        try:
+            if length > 0:
+                raw, source, rotate = self.rfile.read(length), Path(q.get("name", "scan.glb")).name[:80], 0
+            else:
+                raw, source = (DATA / "scan" / "scan.glb").read_bytes(), old.get("source", "scan.glb")
+                rotate = (int(old.get("rotate", 0)) + 1) % 4
+            room = import_scan.import_room(raw, source, rotate, DATA)
+        except FileNotFoundError:
+            return self._json({"error": "no room scan imported yet"}, 404)
+        except (ValueError, KeyError, IndexError, zipfile.BadZipFile) as exc:
+            return self._json({"error": f"couldn't read that scan: {exc}"}, 400)
+        with APP.lock:
+            layout = dict(APP.layout, polygon=room["polygon"])
+            # Calibration is kept per layout name, so a different scan gets a fresh set and an old room's comes back.
+            if source != old.get("source"):
+                layout["name"] = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(source).stem)[:60] or "room"
+            _post_layout(APP, {"layout": layout})
+        w, d = room["polygon"][2]
+        outside = [k for k, r in layout["receivers"].items() if not (0 <= r["x"] <= w and 0 <= r["y"] <= d)]
+        return self._json({"ok": True, "w": w, "d": d, "objects": len(room["objects"]), "outside": outside})
+
     def do_POST(self):
-        path = urlparse(self.path).path
+        url = urlparse(self.path)
+        path = url.path
+        if path == "/api/scan/import":
+            return self._scan_import(url)
         try:
             body = self._body()
         except ValueError:
