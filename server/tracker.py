@@ -6,9 +6,7 @@ deterministic. Callers hold App.lock.
 from __future__ import annotations
 
 import math
-import sys
 from collections import deque
-from pathlib import Path
 from enum import Enum
 from typing import Callable, Dict, List, Optional
 
@@ -17,10 +15,6 @@ import sensing
 import settings as cfg
 import phone_filter
 from display import Crowd, PointSmoother
-
-# The camera fusion lives in the repo's camera/ folder (numpy only, like the rest of the server).
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from camera.fusion import CameraFusion  # noqa: E402
 
 STALE_S = 3.0
 LOST_S = 60.0
@@ -187,10 +181,6 @@ class Tracker:
         self.body_trail: deque = deque()
         # Per-window RSSI statistic used for phones: "r" (mean) or "q3" (upper quartile). Set from settings each tick.
         self.rssi_key = "r"
-        # Laptop camera ("camera" setting): detections only ever sharpen a joined phone, see camera/fusion.py.
-        self.camera = CameraFusion()
-        self._camera_cal = None
-        self._camera_match: Dict[str, object] = {}
 
     def _event(self, t: float, text: str):
         self.events.append([t, text])
@@ -267,10 +257,6 @@ class Tracker:
         kind = pkt.get("t")
         if kind == "crowd":
             self._crowd(pkt)
-            return
-        if kind == "cam":
-            # Not a radio receiver: kept out of nodes so it never counts as a board or a link end.
-            self.camera.ingest(pkt, rt)
             return
         node = self.nodes.get(nid)
         if node is None:
@@ -572,10 +558,6 @@ class Tracker:
             if mv == -1 or radio == 1:
                 mv = radio
         extra = [FUSE_W * v for v in fuse] if fuse is not None else None
-        det = self._camera_match.get(mac)
-        if det is not None and len(m.cx) == len(m.cells):
-            cam = self.camera.loglik(det, m.cx, m.cy)
-            extra = cam if extra is None else cam + extra
         result = ph.track.step(m, t, lambda t0, t1: self.window(ph, t0, t1), mv, steps, facing,
                                float(ctx.get("stride") or STRIDE_M), st["pdr"], st["shadow_guard"],
                                strength=strength, extra=extra, holder_facing=facing, creep=creep)
@@ -590,9 +572,7 @@ class Tracker:
         raw = ph.raw
         ph.est = {"x": x, "y": y, "unc": unc, "raw": [round(raw["x"], 3), round(raw["y"], 3), round(raw["unc"], 3)],
                   "receivers": ph.receivers, "mode": "calibrated" if m.spots else "uncalibrated",
-                  "kind": ph.status.value, "age": age, "t": t,
-                  # "feet" / "head" while the laptop camera is sharpening this phone's position, else None.
-                  "camera": det.kind if det is not None else None}
+                  "kind": ph.status.value, "age": age, "t": t}
         self._trail(ph, m, t)
         return True
 
@@ -604,26 +584,12 @@ class Tracker:
         m = ctx.get("map")
         self._body_tick(t, ctx, st)
         fuse = self.body_ll if st["fuse_body"] and len(self.phones) == 1 else None
-        self._camera_tick(t, ctx, st)
         for mac in list(self.phones):
             if not self._phone_tick(mac, self.phones[mac], t, ctx, st, m, fuse):
                 del self.phones[mac]
         self._capture_tick(t)
         layout = ctx.get("layout") or {}
         self.crowd.step(t, layout.get("polygon"), ctx.get("objects") or [])
-
-    def _camera_tick(self, t: float, ctx: dict, st: dict):
-        """Match fresh camera detections to joined phones' raw estimates (never the smoothed display dot)."""
-        cal = ctx.get("camera")
-        if cal is not self._camera_cal:
-            self._camera_cal = cal
-            self.camera.set_calibration(cal)
-        self._camera_match = {}
-        if not st["camera"]:
-            return
-        tracks = {mac: (ph.raw["x"], ph.raw["y"], ph.raw["unc"]) for mac, ph in self.phones.items()
-                  if ph.raw and ph.status in (Status.ESTIMATED, Status.WEAK)}
-        self._camera_match = self.camera.assign(tracks, t)
 
     def _trail(self, ph: Phone, m, t: float):
         kind = ph.status.value
@@ -743,8 +709,6 @@ class Tracker:
             "events": list(self.events)[-25:], "packets": self.packets, "bad_packets": self.bad_packets,
             "body": dict(self.body, trail=list(self.body_trail)) if self.body else None,
             "crowd": self.crowd.snapshot(),
-            # Counts only: positions of people the camera sees are never sent.
-            "camera": self.camera.status(t) if self.camera.last_rt is not None or self.camera.calibrated else None,
         }
         cap = self.capture
         if cap:

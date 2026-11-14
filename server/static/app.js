@@ -11,10 +11,11 @@ const PALETTE = ["#8fdcb2", "#7fa8ff", "#f4a259", "#e07bb5", "#e6c44c", "#b38cff
 const STATUS_COLOR = { online: "#8fdcb2", stale: "#e6b24c", offline: "#ee6a73" };
 const GREY = "#7a819c";
 
-// S: latest snapshot from the server (SSE, ~4 Hz). L: the layout on screen; follows S.layout unless editing.
+// S: latest snapshot from the server (SSE, ~4 Hz). L: the layout on screen; follows S.layout unless editing, which
+// means L holds unsaved changes (started by the first drag, place or typed number; ended by save or undo).
 let S = null, L = null, view = "live", stream = null;
 let editing = false, selectedPhone = null, selectedCorner = -1, dragging = null, placing = null, plan = null;
-let tab = "tLayout", simple = true, show3d = false, v3 = null, SCAN = null;
+let tab = "tLayout", simple = true, show3d = false, v3 = null, SCAN = null, scanLoaded = false, autoOpened = false;
 const colors = {};
 // Drawn marker per phone (mac -> {x, y, unc}), eased toward the latest estimate each frame so the 2D map moves
 // smoothly between 4 Hz snapshots.
@@ -54,9 +55,10 @@ function connect() {
 function loadScan() {
   fetch("/api/scan").then((r) => r.json()).then((j) => {
     SCAN = j && j.polygon ? j : null;
+    scanLoaded = true;
     if (v3) v3.roomSig = "";
     drawMap();
-  }).catch(() => {});
+  }).catch(() => { scanLoaded = true; });
 }
 
 // The phone-free person (tracker.body) joins S.phones so map, list and 3D draw it like a phone. "body" is not a MAC
@@ -95,15 +97,19 @@ function ensure3d() {
     catch (e) { fail3d("The 3D view couldn't start: WebGL is off or unavailable in this browser (" + esc(e.message || e) + ")."); }
   }
   if (!v3 && !window.Luna3D) {
-    setTimeout(() => { if (!window.Luna3D && simple && show3d) fail3d("The 3D view didn't load (is three.js in server/static/lib/three?). Reload to retry."); }, 4000);
+    setTimeout(() => { if (!window.Luna3D && map3d()) fail3d("The 3D view didn't load (is three.js in server/static/lib/three?). Reload to retry."); }, 4000);
   }
   return v3;
 }
+// 3D is set aside while the Boards step is open: placing boards needs the 2D map.
+const boardsOpen = () => simple && $("stBoards").open;
+const map3d = () => simple && show3d && !boardsOpen();
 function apply3d() {
-  const on = simple && show3d;
+  const on = map3d();
   document.body.classList.toggle("d3", on);
   $("view3d").classList.toggle("hidden", !on);
-  $("dimTog").textContent = on ? "2D map" : "3D view";
+  $("dimTog").textContent = show3d ? "2D map" : "3D view";
+  $("dimTog").disabled = boardsOpen();
   if (on && ensure3d()) {
     v3.setVisible(true);
     if (S) { v3.setRoom(S.layout, SCAN); v3.update(S, colorFor, nodeLabel); }
@@ -114,8 +120,8 @@ window.addEventListener("luna3d-ready", apply3d);
 
 function applyMode() {
   document.body.classList.toggle("simple", simple);
-  $("modeTog").textContent = simple ? "Setup & debug" : "Simple view";
-  if (simple && editing) { editing = false; $("editTog").checked = false; }
+  $("modeTog").textContent = simple ? "Advanced" : "Simple view";
+  layoutSig = "";
   setTimeout(drawMap, 0);
   apply3d();
 }
@@ -127,8 +133,8 @@ function render() {
   $("viewBadge").className = "badge " + (live ? "live" : "replay");
   const net = S.ssid ? `network “${S.ssid}”` : "no config/network.json";
   $("hdrInfo").textContent = `${net} · laptop ${S.laptop_ip ? "on the demo network" : "NOT on the demo network"}`;
-  $("recBadge").textContent = S.recording.on ? "● REC" : "not recording";
-  $("recBadge").className = "badge" + (S.recording.on ? " rec" : "");
+  $("recBadge").textContent = "● REC";
+  $("recBadge").className = "badge rec" + (S.recording.on ? "" : " hidden");
   $("recTog").textContent = S.recording.on ? "Stop recording" : "Start recording";
   $("recInfo").textContent = S.recording.on ? `${S.recording.file} (${S.recording.packets} packets)` : "";
   $("viewTog").textContent = live ? "Show replay" : "Back to live";
@@ -140,9 +146,10 @@ function render() {
     $("rpPause").textContent = rp.state === "paused" ? "Play" : "Pause";
     $("rpPause").disabled = rp.state === "finished";
   }
-  renderSimple();
-  if (!simple) { renderTables(); renderLayoutPanel(); renderCalibration(); renderSettings(); }
-  if (simple && show3d && v3) { v3.setRoom(S.layout, SCAN); v3.update(S, colorFor, nodeLabel); }
+  renderLayoutPanel();
+  if (simple) { renderSimple(); renderSetup(); renderTuning(); }
+  else { renderTables(); renderCalibration(); renderSettings(); }
+  if (map3d() && v3) { v3.setRoom(S.layout, SCAN); v3.update(S, colorFor, nodeLabel); }
 }
 
 function boundsOf(poly) {
@@ -181,30 +188,9 @@ function placeName(x, y) {
 
 function whereText(p) {
   const e = p.est;
-  if (!e) return Object.keys(S.layout?.receivers || {}).length ? "waiting for all boards…" : "place the boards in Setup → Layout";
+  if (!e) return Object.keys(S.layout?.receivers || {}).length ? "waiting for all boards…" : "place the boards (Setup → Boards)";
   if (e.kind === "stale") return `not heard for ${age(p.age)}`;
-  return `(${ft(e.x)}, ${ft(e.y)}) ft ± ${ft(e.unc)} ft` + (e.kind === "weak" ? " · few boards hear it" : "") +
-    (e.camera ? ` · camera (${e.camera})` : "");
-}
-
-// Laptop camera (camera/README.md): one line saying whether it is helping and, if not, what to do about it. The
-// server only sends counts (S.camera); it never sends where unmatched people are.
-const CAM_STALE_S = 3;
-function cameraHtml() {
-  const c = S.camera, on = !!(S.settings || {}).camera;
-  const line = (status, text) => `<span class="dot ${status}"></span>${text}`;
-  if (!c) return line("offline", on ? 'Not connected. Run <span class="mono">python camera/luna_camera.py</span>.'
-    : '<span class="muted">Not in use (optional: run <span class="mono">camera/luna_camera.py</span>, then turn on ' +
-      "<b>Laptop camera helps phone</b> in Settings).</span>");
-  if (c.age == null || c.age > CAM_STALE_S) return line("offline", `Stopped sending ${c.age == null ? "" : age(c.age) + " ago"}: ` +
-    'is <span class="mono">luna_camera.py</span> still running?');
-  if (!c.calibrated) return line("stale", 'Connected but not calibrated: run <span class="mono">python camera/calibrate.py</span> ' +
-    "and stand on 4+ marks, pressing space on each.");
-  const seen = `sees ${c.seen}` + (c.seen_by_head ? ` (${c.seen_by_head} by head)` : "");
-  const head = c.head_calibrated ? "" : '<br><span class="warnbox">Feet only: recalibrate pressing space on each mark to add ' +
-    "the head fallback and the is-it-a-person check.</span>";
-  if (!on) return line("stale", `Connected, ${seen}, but <b>Laptop camera helps phone</b> is off in Settings.`) + head;
-  return line("online", `Live · ${seen} · sharpening ${c.used} phone${c.used === 1 ? "" : "s"}`) + head;
+  return `(${ft(e.x)}, ${ft(e.y)}) ft ± ${ft(e.unc)} ft` + (e.kind === "weak" ? " · few boards hear it" : "");
 }
 const displayName = (p) => p.name || "Phone " + p.mac_fmt.slice(-5);
 
@@ -213,26 +199,75 @@ function renderSimple() {
   $("sPeople").innerHTML = people.map((p) => {
     const e = p.est, stale = e && e.kind === "stale";
     const certainty = e && !stale ? (e.unc < 1.5 * FT ? "pinpointed" : e.unc < 3 * FT ? "located" : "rough area") : "";
-    const line = stale ? `not heard for ${age(p.age)}` : e ? `${placeName(e.x, e.y)} · ${certainty}, within ~${ft(e.unc, 0)} ft` +
-      (e.camera ? " · camera helping" : "") : esc(whereText(p));
+    const line = stale ? `not heard for ${age(p.age)}` : e ? `${placeName(e.x, e.y)} · ${certainty}, within ~${ft(e.unc, 0)} ft` : esc(whereText(p));
     return `<div class="person ${stale ? "stale" : ""}"><span class="sw" style="background:${colorFor(p.mac)}"></span>
       <div><div class="nm">${esc(displayName(p))}</div><div class="wh">${line}</div></div></div>`;
-  }).join("") || '<div class="muted">Nobody yet. Join the demo network and open http://192.168.4.1</div>';
-  $("sRx").innerHTML = (S.nodes.map((n) => `<span class="rxchip"><span class="dot ${n.status}"></span>${esc(n.label)}</span>`).join("")
-    || '<span class="muted small">no boards heard. Is the laptop on the demo network?</span>') +
-    // Only shown once a camera is in play, so the simple view stays simple for Wi-Fi-only setups.
-    (S.camera || S.settings?.camera ? `<span class="rxchip" title="${esc(cameraHtml().replace(/<[^>]+>/g, ""))}">` +
-      `<span class="dot ${S.camera && S.camera.age != null && S.camera.age <= CAM_STALE_S && S.camera.calibrated && S.settings?.camera ? "online" : "stale"}"></span>camera</span>` : "");
+  }).join("") || '<div class="muted small">Nobody yet. Join a phone to the demo network.</div>';
+}
 
-  const unplaced = S.nodes.filter((n) => !L.receivers[n.id]).length;
+const scanMatches = () => !!SCAN &&
+  ["x0", "x1", "y0", "y1"].every((k) => Math.abs(boundsOf(SCAN.polygon)[k] - boundsOf(S.layout.polygon)[k]) < 0.3);
+
+function phoneUrlHtml() {
+  const pc = S.phone_cal || {};
+  if (!pc.port) return '<span class="warnbox">The phone calibration page is off (port in use?).</span>';
+  if (!S.laptop_ip) return '<span class="warnbox">Join the laptop to the demo network to use phone calibration.</span>';
+  return `On a phone joined to the demo network open <b>${pc.https ? "https" : "http"}://${esc(S.laptop_ip)}:${pc.port}/</b>` +
+    (pc.https ? '<br><span class="muted">First time: the phone warns about the certificate. Show Details → visit this website.</span>' : "");
+}
+
+// The three setup steps. Each shows a tick when done; the first unfinished one opens by itself once per page load.
+function setStep(id, done, sum) {
+  const el = $(id);
+  el.classList.toggle("done", done);
+  el.querySelector(".sum").innerHTML = sum;
+  return done;
+}
+function renderSetup() {
+  const b = boundsOf(S.layout.polygon), scanned = scanMatches();
+  const roomDone = setStep("stRoom", scanned, `${ft(b.x1 - b.x0)} × ${ft(b.y1 - b.y0)} ft${scanned ? " · scanned" : ""}`);
+  $("scanTurn").classList.toggle("hidden", !SCAN);
+  if (document.activeElement !== $("sRoomW")) $("sRoomW").value = ft(b.x1 - b.x0);
+  if (document.activeElement !== $("sRoomH")) $("sRoomH").value = ft(b.y1 - b.y0);
+
+  const unplaced = S.nodes.filter((n) => !S.layout.receivers[n.id]).length;
+  const chips = S.nodes.map((n) => `<span class="rxchip"><span class="dot ${n.status}"></span>${esc(n.label)}</span>`).join("");
+  const boardsDone = setStep("stBoards", S.nodes.length >= 3 && !unplaced,
+    S.nodes.length ? chips + (unplaced ? ` <span class="warnbox">${unplaced} to place</span>` : "") : '<span class="warnbox">none heard</span>');
+
   const c = S.calib, ev = c.evaluation;
-  let hint;
-  if (unplaced) hint = `${unplaced} board(s) not on the map yet (Setup & debug → Layout).`;
-  else if (S.settings?.device_free && !c.df?.empty) hint = "Phone-free tracking is on but the empty room hasn't been recorded (phone page → More, or Setup → Calibrate).";
-  else if (!c.spots.length) hint = "Not calibrated, so positions are rough. Open the phone page (Setup & debug → Calibrate) and mark a few spots with I'm here.";
-  else if (ev && ev.loo) hint = `Calibrated with ${c.spots.length} points · a single reading is ~${ft(ev.loo.median_m)} ft off, better when tracked with Motion on`;
-  else hint = `Calibrated with ${c.spots.length} point(s).`;
-  $("sHint").innerHTML = hint;
+  const calDone = setStep("stCal", c.spots.length > 0,
+    ev && ev.loo ? `~${ft(ev.loo.median_m)} ft` : c.spots.length ? `${c.spots.length} points` : "not yet");
+  $("sPhoneUrl").innerHTML = phoneUrlHtml();
+  $("sCalQual").innerHTML = ev && ev.loo
+    ? `A single reading is ~${ft(ev.loo.median_m)} ft off (80% within ${ft(ev.loo.p80_m)} ft). Tracking someone who moves, with Motion on, does better.`
+    : c.spots.length ? "A few more marks and accuracy can be measured." : "";
+  $("sCalClear").classList.toggle("hidden", !c.spots.length && !(c.tests || []).length);
+
+  // Wait for the scan and the first board reports so a finished step isn't mistaken for an unfinished one.
+  if (!autoOpened && scanLoaded && (S.nodes.length || performance.now() > 5000)) {
+    autoOpened = true;
+    const first = [["stRoom", roomDone || boardsDone], ["stBoards", boardsDone], ["stCal", calDone]].find((x) => !x[1]);
+    if (first) { $(first[0]).open = true; apply3d(); }
+  }
+}
+
+// Tuning: the same switches as Advanced → Settings, one line each (description on hover), changes from the defaults
+// marked.
+let tuneSig = "";
+function renderTuning() {
+  const st = S.settings || {}, info = S.settings_info || {}, def = S.settings_defaults || {};
+  const sig = JSON.stringify([st, def]);
+  if (sig === tuneSig) return;
+  tuneSig = sig;
+  const changed = Object.keys(info).filter((k) => k in def && !!st[k] !== !!def[k]);
+  $("sSet").innerHTML = Object.keys(info).map((k) => `<label class="setrow mini" title="${esc(info[k][1])}">
+    <input type="checkbox" data-tune="${esc(k)}" ${st[k] ? "checked" : ""}><span>${esc(info[k][0])}</span>
+    ${changed.includes(k) ? '<i class="chg">changed</i>' : ""}</label>`).join("");
+  document.querySelectorAll("[data-tune]").forEach((b) => (b.onchange = () => api("/api/settings", { key: b.dataset.tune, on: b.checked })));
+  $("tuneSum").textContent = changed.length ? `${changed.length} changed` : "recommended";
+  $("setReset").classList.toggle("hidden", !changed.length);
+  $("setReset").onclick = async () => { for (const k of changed) await api("/api/settings", { key: k, on: !!def[k] }); };
 }
 
 function renderTables() {
@@ -243,7 +278,6 @@ function renderTables() {
         <td>${age(n.age)}</td><td>${n.pkt_rate}</td><td>${n.frame_rate}${n.ctrl_rate ? ` <span class="muted">(${n.ctrl_rate} ctl)</span>` : ""}</td>
         <td>${n.loss_pct}%</td><td class="small muted">${notes}</td></tr>`;
     }).join("") + (S.nodes.length ? "" : '<tr><td colspan=7 class="muted">no boards heard yet</td></tr>');
-  $("camInfo").innerHTML = cameraHtml();
 
   const ids = S.nodes.map((n) => n.id);
   const cell = (q) => (q && q.r != null ? `${q.r}<span class=muted>/${q.rate}</span>` : "<span class=muted>—</span>");
@@ -341,7 +375,7 @@ function drawRoom() {
   ctx.save(); ctx.translate(toX(b.x0) - 12, toY((b.y0 + b.y1) / 2)); ctx.rotate(-Math.PI / 2);
   label(`${ft(b.y1 - b.y0)} ft`, 0, 0, "11px sans-serif", "#8d95b3", "center");
   ctx.restore();
-  if (editing) L.polygon.forEach((p, i) => { ctx.fillStyle = i === selectedCorner ? "#e6b24c" : "#6d7699"; ctx.fillRect(toX(p[0]) - 5, toY(p[1]) - 5, 10, 10); });
+  if (canvasMode() === "edit") L.polygon.forEach((p, i) => { ctx.fillStyle = i === selectedCorner ? "#e6b24c" : "#6d7699"; ctx.fillRect(toX(p[0]) - 5, toY(p[1]) - 5, 10, 10); });
 }
 
 function drawCalibration() {
@@ -357,13 +391,16 @@ function drawCalibration() {
   }
 }
 
-function drawBoards() {
+function drawPlan() {
   if (plan) for (const p of plan.spots) {
     const X = toX(p.x), Y = toY(p.y);
     ctx.strokeStyle = "#e6b24c"; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
     ctx.beginPath(); ctx.arc(X, Y, 13, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
     label(`${p.label} here`, X + 15, Y - 10, "bold 12px sans-serif", "#e6b24c");
   }
+}
+
+function drawBoards() {
   for (const [id, p] of Object.entries(L.receivers)) {
     const node = S?.nodes.find((n) => n.id === id), X = toX(p.x), Y = toY(p.y);
     ctx.beginPath(); ctx.moveTo(X, Y - 9); ctx.lineTo(X + 8, Y + 6); ctx.lineTo(X - 8, Y + 6); ctx.closePath();
@@ -404,12 +441,7 @@ function drawPerson(p, now) {
   }
   ctx.beginPath(); ctx.arc(X, Y, 7, 0, 2 * Math.PI);
   if (e.kind === "estimated") { ctx.fillStyle = c; ctx.fill(); } else { ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.stroke(); }
-  if (e.camera && !stale) {
-    // The laptop camera is sharpening this phone: a white ring (dashed when placed by the head, feet hidden).
-    ctx.beginPath(); ctx.arc(X, Y, 11, 0, 2 * Math.PI); ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
-    ctx.setLineDash(e.camera === "head" ? [3, 3] : []); ctx.stroke(); ctx.setLineDash([]);
-  }
-  const note = (stale ? ` (not heard ${age(p.age)})` : e.kind === "weak" ? " (few boards)" : "") + (e.camera && !stale ? " · camera" : "");
+  const note = stale ? ` (not heard ${age(p.age)})` : e.kind === "weak" ? " (few boards)" : "";
   label((p.name || p.mac_fmt.slice(-5)) + note, X + 10, Y - 9, "12px sans-serif", "#e7eaf6");
   if (!stale && m.unc > VAGUE_UNC_M) label(placeName(m.x, m.y), X + 10, Y + 5, "11px sans-serif", "#a3abc8");
 }
@@ -420,6 +452,7 @@ function drawMap() {
   ctx.clearRect(0, 0, view2d.w, view2d.h);
   drawRoom();
   if (!simple) drawCalibration();
+  drawPlan();
   drawBoards();
   const now = performance.now() / 1000;
   for (const p of S?.phones || []) drawPerson(p, now);
@@ -444,7 +477,7 @@ function frame(t) {
     else { m.x += (e.x - m.x) * k; m.y += (e.y - m.y) * k; m.unc += (e.unc - m.unc) * k; }
   }
   for (const mac of Object.keys(shown)) if (!alive.has(mac)) delete shown[mac];
-  if (!(simple && show3d) && !document.hidden) drawMap();
+  if (!map3d() && !document.hidden) drawMap();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -458,25 +491,35 @@ function pick(px, py) {
 // What a click on the map does, by priority. This is the only place that decides it.
 function canvasMode() {
   if (placing) return "place";
-  if (editing) return "edit";
+  if (!simple && tab === "tLayout") return "edit";
+  if (boardsOpen()) return "boards";
   return "view";
 }
 const pointer = (ev) => { const r = canvas.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
 canvas.addEventListener("mousedown", (ev) => {
   const [px, py] = pointer(ev), mode = canvasMode();
   if (mode === "place") {
+    startEditing();
     L.receivers[placing.id] = { x: snapFt(fromX(px)), y: snapFt(fromY(py)) };
     placing = null;
     renderLayoutPanel(true); drawMap();
     return;
   }
-  if (mode !== "edit") return;
-  dragging = pick(px, py);
-  if (dragging && dragging.kind === "corner") selectedCorner = dragging.i;
+  if (mode === "view") return;
+  const hit = pick(px, py);
+  if (!hit || (mode === "boards" && hit.kind !== "board")) return;
+  startEditing();
+  dragging = hit;
+  if (hit.kind === "corner") selectedCorner = hit.i;
 });
 canvas.addEventListener("mousemove", (ev) => {
-  if (!dragging) return;
-  const [px, py] = pointer(ev), x = snapFt(fromX(px)), y = snapFt(fromY(py));
+  const [px, py] = pointer(ev), mode = canvasMode();
+  if (!dragging) {
+    const hit = mode === "edit" || mode === "boards" ? pick(px, py) : null;
+    canvas.style.cursor = mode === "place" ? "crosshair" : hit && (mode === "edit" || hit.kind === "board") ? "grab" : "";
+    return;
+  }
+  const x = snapFt(fromX(px)), y = snapFt(fromY(py));
   if (dragging.kind === "board") L.receivers[dragging.id] = { x, y };
   else L.polygon[dragging.i] = [x, y];
   drawMap(); renderLayoutPanel(true);
@@ -485,75 +528,115 @@ window.addEventListener("mouseup", () => { dragging = null; });
 
 let layoutSig = "";
 function renderLayoutPanel(force) {
-  const sig = JSON.stringify([L, S?.nodes.map((n) => n.id), editing]);
+  if (!L) return;
+  const sig = JSON.stringify([L, S?.nodes.map((n) => [n.id, n.status]), editing, simple]);
   if (!force && sig === layoutSig) return;
   layoutSig = sig;
-  const off = editing ? "" : "disabled";
   const ids = new Set([...(S?.nodes || []).map((n) => n.id), ...Object.keys(L.receivers)]);
-  $("rxPlace").innerHTML = [...ids].sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b))).map((id) => {
-    const p = L.receivers[id];
+  const rows = [...ids].sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b))).map((id) => {
+    const p = L.receivers[id], node = S?.nodes.find((n) => n.id === id);
     const fields = p
-      ? `x <input type="number" step="0.5" data-rx="${esc(id)}" data-k="x" value="${ft(p.x)}" ${off}> y <input type="number" step="0.5" data-rx="${esc(id)}" data-k="y" value="${ft(p.y)}" ${off}> ft`
+      ? `x <input type="number" step="0.5" data-rx="${esc(id)}" data-k="x" value="${ft(p.x)}"> y <input type="number" step="0.5" data-rx="${esc(id)}" data-k="y" value="${ft(p.y)}"> ft`
       : '<span class="warnbox">not placed</span>';
-    return `<div class="zrow"><b>${esc(nodeLabel(id))}</b> ${fields} <button data-place="${esc(id)}" ${off}>${p ? "click-place" : "place"}</button></div>`;
-  }).join("") || '<span class="muted small">no boards heard yet</span>';
+    return `<div class="zrow"><span class="dot ${node ? node.status : "offline"}"></span><b>${esc(nodeLabel(id))}</b> ${fields}
+      <button data-place="${esc(id)}" title="then click the map where the board is">${p ? "Place" : "Place on map"}</button></div>`;
+  }).join("") || '<span class="muted small">No boards heard yet. Is the laptop on the demo network?</span>';
+  $(simple ? "sPlace" : "rxPlace").innerHTML = rows;
+  $(simple ? "rxPlace" : "sPlace").innerHTML = "";
   document.querySelectorAll("[data-place]").forEach((b) => (b.onclick = () => { placing = { id: b.dataset.place }; drawMap(); }));
-  document.querySelectorAll("[data-rx]").forEach((inp) => (inp.onchange = () => { L.receivers[inp.dataset.rx][inp.dataset.k] = +inp.value * FT; drawMap(); }));
+  document.querySelectorAll("[data-rx]").forEach((inp) => (inp.onchange = () => {
+    startEditing();
+    L.receivers[inp.dataset.rx][inp.dataset.k] = +inp.value * FT;
+    renderLayoutPanel(true); drawMap();
+  }));
   const b = boundsOf(L.polygon);
   if (document.activeElement !== $("roomW")) $("roomW").value = ft(b.x1 - b.x0);
   if (document.activeElement !== $("roomH")) $("roomH").value = ft(b.y1 - b.y0);
-  for (const id of ["roomW", "roomH", "roomRect", "addVert", "delVert", "saveLayout"]) $(id).disabled = !editing;
+  for (const id of ["saveLayout", "undoLayout"]) $(id).disabled = !editing;
+  for (const id of ["sSave", "sUndo"]) $(id).classList.toggle("hidden", !editing);
 }
 
-function startEditing() { editing = true; $("editTog").checked = true; L = clone(S.layout); }
-function stopEditing() { editing = false; $("editTog").checked = false; }
-const showPlanButtons = (on) => ["planUse", "planHide"].forEach((id) => $(id).classList.toggle("hidden", !on));
+function startEditing() { if (!editing) { editing = true; L = clone(S.layout); } }
+function undoEditing() {
+  editing = false; placing = null; L = clone(S.layout); hidePlan();
+  renderLayoutPanel(true); drawMap();
+}
+async function saveLayout() {
+  await api("/api/layout", { layout: L });
+  editing = false; hidePlan();
+  loadScan();
+  $("layoutMsg").textContent = "saved " + new Date().toLocaleTimeString();
+  renderLayoutPanel(true);
+}
+function hidePlan() {
+  plan = null;
+  for (const id of ["planMsg", "sPlanMsg"]) $(id).textContent = "";
+  for (const id of ["planUse", "planHide", "sPlanUse"]) $(id).classList.add("hidden");
+}
 
-// Suggested board spots from /api/plan (server/planner.py), drawn dashed until hidden or used.
-$("planBtn").onclick = async () => {
-  $("planMsg").textContent = "working it out…";
+// Suggested board spots from /api/plan (server/planner.py), drawn dashed until hidden, undone or saved.
+async function suggest(msg, detailed) {
+  msg.textContent = "working it out…";
   plan = await (await fetch("/api/plan")).json();
-  if (!plan.spots.length) { $("planMsg").textContent = "Set the room outline first."; plan = null; return; }
-  const lines = plan.spots.map((p) => `<b>${esc(p.label)}</b> (${p.role === "AP" ? "hotspot" : "receiver"}): ${ft(p.x)}, ${ft(p.y)} ft, ${esc(p.near)}`);
-  $("planMsg").innerHTML = lines.join("<br>") + `<br>Geometry score ${ft(plan.mean_m)} ft` +
-    (plan.current ? ` vs ${ft(plan.current.mean_m)} ft where the boards are now` : "") +
-    " (lower is better; compares placements, not real accuracy)." + (plan.furniture ? "" : " No matching room scan, so furniture is ignored.");
-  showPlanButtons(true);
+  if (!plan.spots.length) { msg.textContent = "Set the room outline first."; plan = null; return false; }
+  const lines = plan.spots.map((p) => `<b>${esc(p.label)}</b>: ${ft(p.x)}, ${ft(p.y)} ft, ${esc(p.near)}`);
+  msg.innerHTML = lines.join("<br>") + (detailed
+    ? `<br>Geometry score ${ft(plan.mean_m)} ft` + (plan.current ? ` vs ${ft(plan.current.mean_m)} ft where the boards are now` : "") +
+      " (lower is better; compares placements, not real accuracy)." + (plan.furniture ? "" : " No matching room scan, so furniture is ignored.")
+    : "");
   drawMap();
-};
-$("planHide").onclick = () => { plan = null; $("planMsg").textContent = ""; showPlanButtons(false); drawMap(); };
-$("planUse").onclick = () => {
+  return true;
+}
+function usePlan(msg) {
   if (!plan) return;
-  if (!editing) startEditing();
+  startEditing();
   for (const p of plan.spots) if (p.id) L.receivers[p.id] = { x: p.x, y: p.y };
-  $("planMsg").innerHTML += "<br><b>Moved on the map. Put the boards there, measure where they actually are, correct the numbers, then Save layout.</b>";
+  msg.innerHTML += "<br><b>Put the boards there, correct the numbers to where they really are, then Save.</b>";
   renderLayoutPanel(true); drawMap();
-};
-$("editTog").onchange = () => { if ($("editTog").checked) startEditing(); else editing = false; renderLayoutPanel(true); drawMap(); };
-$("roomRect").onclick = () => {
-  const w = +$("roomW").value * FT, h = +$("roomH").value * FT;
-  L.polygon = [[0, 0], [w, 0], [w, h], [0, h]];
-  renderLayoutPanel(true); drawMap();
-};
+}
+$("planBtn").onclick = async () => { if (await suggest($("planMsg"), true)) ["planUse", "planHide"].forEach((id) => $(id).classList.remove("hidden")); };
+$("planHide").onclick = hidePlan;
+$("planUse").onclick = () => usePlan($("planMsg"));
+$("sSuggest").onclick = async () => { if (await suggest($("sPlanMsg"), false)) $("sPlanUse").classList.remove("hidden"); };
+$("sPlanUse").onclick = () => usePlan($("sPlanMsg"));
+$("saveLayout").onclick = $("sSave").onclick = saveLayout;
+$("undoLayout").onclick = $("sUndo").onclick = undoEditing;
+const rectangle = (wFt, hFt) => { startEditing(); const w = wFt * FT, h = hFt * FT; L.polygon = [[0, 0], [w, 0], [w, h], [0, h]]; };
+$("roomRect").onclick = () => { rectangle(+$("roomW").value, +$("roomH").value); renderLayoutPanel(true); drawMap(); };
+$("sRoomSet").onclick = () => { rectangle(+$("sRoomW").value, +$("sRoomH").value); saveLayout(); };
 $("addVert").onclick = () => {
+  startEditing();
   const n = L.polygon.length;
   let longest = 0, len = -1;
   L.polygon.forEach((p, i) => { const q = L.polygon[(i + 1) % n], d = Math.hypot(p[0] - q[0], p[1] - q[1]); if (d > len) { len = d; longest = i; } });
   const p = L.polygon[longest], q = L.polygon[(longest + 1) % n];
   L.polygon.splice(longest + 1, 0, [snapFt((p[0] + q[0]) / 2), snapFt((p[1] + q[1]) / 2)]);
-  drawMap();
+  renderLayoutPanel(true); drawMap();
 };
 $("delVert").onclick = () => {
   if (selectedCorner < 0 || L.polygon.length <= 3) return;
-  L.polygon.splice(selectedCorner, 1); selectedCorner = -1; drawMap();
+  startEditing();
+  L.polygon.splice(selectedCorner, 1); selectedCorner = -1;
+  renderLayoutPanel(true); drawMap();
 };
-$("saveLayout").onclick = async () => {
-  await api("/api/layout", { layout: L });
+
+// Room scan upload: the server measures the room from the mesh (tools/import_scan.import_room) and resizes the layout
+// to it. An empty body re-imports the stored scan turned a further 90 degrees.
+async function importScan(file) {
+  const msg = $("scanMsg");
+  msg.textContent = file ? "Reading the scan… this takes a few seconds." : "Turning…";
+  const res = await fetch("/api/scan/import" + (file ? "?name=" + encodeURIComponent(file.name) : ""),
+    { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file || new Blob() });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) { msg.innerHTML = `<span class="badbox">${esc(j.error || res.status)}</span>`; return; }
+  msg.innerHTML = `Room is ${ft(j.w)} × ${ft(j.d)} ft with ${j.objects} piece(s) of furniture.` +
+    (j.outside.length ? ` <span class="warnbox">${j.outside.map((id) => esc(nodeLabel(id))).join(", ")} now outside the room: place again.</span>` : "");
+  editing = false;
   loadScan();
-  $("layoutMsg").textContent = "saved " + new Date().toLocaleTimeString();
-  stopEditing();
-  renderLayoutPanel(true);
-};
+}
+$("scanFile").onchange = () => { const f = $("scanFile").files[0]; $("scanFile").value = ""; if (f) importScan(f); };
+$("scanTurn").onclick = () => importScan(null);
+$("stBoards").addEventListener("toggle", () => { if (!$("stBoards").open) placing = null; apply3d(); drawMap(); });
 
 function accuracyHtml(c) {
   const ev = c.evaluation, tests = c.test_summary, m = c.map;
@@ -588,11 +671,7 @@ function spotListHtml(spots) {
 
 let calSig = "";
 function renderCalibration() {
-  const pc = S.phone_cal || {};
-  if (!pc.port) $("phoneCal").innerHTML = '<span class="warnbox">The phone calibration page is off (port in use?).</span>';
-  else if (S.laptop_ip) $("phoneCal").innerHTML = `On a phone joined to the demo network open <b>${pc.https ? "https" : "http"}://${esc(S.laptop_ip)}:${pc.port}/</b>` +
-    (pc.https ? '<br><span class="muted">The first time, the phone warns the certificate isn\'t trusted: Show Details → visit this website.</span>' : "");
-  else $("phoneCal").innerHTML = '<span class="warnbox">Join the laptop to the demo network to use phone calibration.</span>';
+  $("phoneCal").innerHTML = phoneUrlHtml();
 
   const c = S.calib;
   const sig = JSON.stringify([c.name, c.spots.length, c.tests.length, c.evaluation, c.map]);
@@ -611,7 +690,7 @@ function renderCalibration() {
   $("emptyGo").disabled = !!S.capture;
 }
 $("emptyGo").onclick = () => api("/api/empty/start", {});
-$("calClear").onclick = () => { if (confirm("Delete every walk, point and check for this room?")) api("/api/calib/clear", {}); };
+$("calClear").onclick = $("sCalClear").onclick = () => { if (confirm("Delete every walk, point and check for this room?")) api("/api/calib/clear", {}); };
 
 // Settings: live switches (server/settings.py) plus the lab, which replays recordings with each one flipped.
 let setSig = "";
@@ -671,6 +750,7 @@ $("v3top").onclick = () => v3 && v3.topView();
 $("modeTog").onclick = () => { simple = !simple; remember("lunaMode", simple ? "simple" : "debug"); applyMode(); };
 document.querySelectorAll(".tabs button").forEach((btn) => (btn.onclick = () => {
   tab = btn.dataset.tab;
+  placing = null;
   document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b === btn));
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("hidden", t.id !== tab));
   if (tab === "tSess") loadSessions();

@@ -12,7 +12,7 @@
  *   - It generates only light, meaningless traffic so the receivers have frames to measure.
  *
  * Hardware: a spare ESP32 / ESP32-S3 acting as the "demo phone" (NOT the Uno Q — its Wi-Fi is on the Linux side;
- * see docs/CROWD.md for the Uno Q alternative). Needs the "esp32 by Espressif" board package in the Arduino IDE.
+ * the Uno Q white button toggles the simulated crowd instead). Needs the "esp32 by Espressif" board package in the Arduino IDE.
  *
  * Fill in the hotspot name/password below to match config/network.json. Do not commit real secrets.
  */
@@ -20,7 +20,7 @@
 #include <WiFiUdp.h>
 #include "esp_wifi.h"
 
-const char *SSID = "DEMO-DONT JOIN";
+const char *SSID = "WATCHING-YOU";     // must match config/network.json
 const char *PASS = "<hotspot password>";   // from config/network.json; leave the placeholder out of git
 const uint32_t ROTATE_S = 8;               // change our own address every N seconds
 const char *SERVER_IP = "192.168.4.2";     // laptop IP, just to aim the light traffic somewhere

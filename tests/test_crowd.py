@@ -28,6 +28,13 @@ class CrowdTest(unittest.TestCase):
         self.c.tick(0.25, ROOM)
         self.assertEqual(self.c.snapshot(), [])
 
+    def test_toggle_packet_flips_current_state(self):
+        self.c.set(True)   # e.g. turned on from the web page first
+        self.c.handle_packet({"t": "crowd", "toggle": 1})
+        self.assertEqual(self.c.state, CrowdState.OFF)
+        self.c.handle_packet({"t": "crowd", "toggle": 1})
+        self.assertEqual(self.c.state, CrowdState.ON)
+
     def test_ignores_other_packets(self):
         self.assertFalse(self.c.handle_packet({"t": "tel"}))
 

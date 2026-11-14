@@ -8,7 +8,8 @@ extra SIMULATED phones that wander near the real person. It is cosmetic only:
   "Raw vs display" and the crowd.py row in the "Display only" section).
 - Every decoy is flagged `sim: True` and carries a reserved, clearly-fake MAC, so the UI can label it as simulated.
 
-Toggled by the Uno Q button via {"t": "crowd", "on": 0|1} (firmware/crowd_button + tools/unoq_crowd_relay.py).
+Toggled over UDP by {"t": "crowd", "on": 0|1} or {"t": "crowd", "toggle": 1}; the Uno Q white button sends the toggle
+through tools/unoq_button_adb.py.
 
 Standard library only. Stepped from the tracker with the shared timestamp, never the wall clock, so replays match.
 """
@@ -131,6 +132,10 @@ class Crowd:
     def handle_packet(self, p):
         """If p is a crowd button message, apply it and return True; else False."""
         if p.get("t") == "crowd":
-            self.set(p.get("on"))
+            # {"toggle": 1} flips whatever the state is now, so a button stays in step with the web toggle.
+            if p.get("toggle"):
+                self.toggle()
+            else:
+                self.set(p.get("on"))
             return True
         return False

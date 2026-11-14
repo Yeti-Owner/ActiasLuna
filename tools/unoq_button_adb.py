@@ -16,6 +16,7 @@ import argparse
 import glob
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -27,10 +28,21 @@ BOARD_READER_REMOTE = "/tmp/moth_btn_reader.py"
 def find_adb(explicit):
     if explicit:
         return explicit
-    pattern = os.path.join(os.environ.get("LOCALAPPDATA", ""),
-                           "Arduino15", "packages", "arduino", "tools", "adb", "*", "adb.exe")
-    hits = sorted(glob.glob(pattern))
-    return hits[-1] if hits else "adb"
+    found = shutil.which("adb")
+    if found:
+        return found
+    local = os.environ.get("LOCALAPPDATA", "")
+    patterns = [
+        os.path.join(local, "Arduino15", "packages", "arduino", "tools", "adb", "*", "adb.exe"),
+        os.path.join(local, "Android", "Sdk", "platform-tools", "adb.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", ""), "Android", "android-sdk", "platform-tools", "adb.exe"),
+        os.path.join(os.environ.get("ProgramFiles", ""), "Android", "android-sdk", "platform-tools", "adb.exe"),
+    ]
+    for pattern in patterns:
+        hits = sorted(glob.glob(pattern))
+        if hits:
+            return hits[-1]
+    return None
 
 
 def main():
@@ -41,6 +53,9 @@ def main():
     ap.add_argument("--adb", help="path to adb.exe (default: auto-detect from Arduino)")
     args = ap.parse_args()
     adb = find_adb(args.adb)
+    if not adb:
+        sys.exit("adb not found. Install Android platform-tools (winget install Google.PlatformTools) "
+                 "or pass --adb <path to adb.exe>.")
 
     check = subprocess.run([adb, "get-state"], capture_output=True, text=True)
     if "device" not in check.stdout:
@@ -50,16 +65,16 @@ def main():
                    stdout=subprocess.DEVNULL)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    crowd_on = False
     proc = subprocess.Popen([adb, "shell", f"python3 -u {BOARD_READER_REMOTE} {args.device}"],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    print(f"Ready. Press the white button to toggle the crowd (-> {args.server}:{args.port}). Ctrl+C to stop.")
+    print(f"Ready. Press the white button to toggle the crowd (-> {args.server}:{args.port}). Ctrl+C to stop.", flush=True)
     try:
         for line in proc.stdout:
             if "PRESS" in line:
-                crowd_on = not crowd_on
-                sock.sendto(json.dumps({"t": "crowd", "on": int(crowd_on)}).encode(), (args.server, args.port))
-                print(f"white button -> crowd {'ON' if crowd_on else 'off'}")
+                sock.sendto(json.dumps({"t": "crowd", "toggle": 1}).encode(), (args.server, args.port))
+                print("white button -> crowd toggled", flush=True)
+            elif line.strip():
+                print(f"board: {line.rstrip()}", flush=True)
     except KeyboardInterrupt:
         pass
     finally:

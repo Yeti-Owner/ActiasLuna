@@ -3,7 +3,7 @@
 Loads a room file (the one the 3D view uses) and runs the crowd in it, so you can check the decoys land inside
 the room and off the furniture, in the same coordinates as the ESP32 markers.
 
-    py tools/preview_room.py data/scan/sample/room.json
+    py tools/preview_room.py data/scan/room.json
     py tools/preview_room.py path/to/your/room.json --count 12 --seconds 8
 
 If the room file has a different shape than expected, this prints what it understood (size + furniture); paste me

@@ -8,8 +8,11 @@ footprints of the furniture standing in the room. The outline is put in the layo
 Furniture labels are guesses from size and height (planner.FURNITURE_WEIGHT keys); fix them in room.json if wrong.
 
   python tools/import_scan.py scan.zip [--rotate 0..3] [--set-layout]
+
+The dashboard's "Import room scan" calls import_room() through /api/scan/import with the same rules.
 """
 import argparse
+import io
 import json
 import math
 import struct
@@ -33,28 +36,29 @@ FLAT_M = 0.08
 CLOSE_CELLS = 3
 
 
-def read_glb(path: Path) -> bytes:
-    if path.suffix.lower() == ".zip":
-        with zipfile.ZipFile(path) as z:
+def glb_of(raw: bytes) -> bytes:
+    """The .glb inside raw, which is either a .glb or a .zip holding one."""
+    if raw[:2] == b"PK":
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
             names = [n for n in z.namelist() if n.lower().endswith(".glb")]
             if not names:
-                sys.exit("no .glb inside the zip (a .gltf with side files isn't supported)")
+                raise ValueError("no .glb inside the zip (a .gltf with side files isn't supported)")
             return z.read(names[0])
-    return path.read_bytes()
+    return raw
 
 
 def mesh_of(glb: bytes):
     """All triangles in scene coordinates. Node transforms are assumed identity (true for phone-scanner exports)."""
     if glb[:4] != b"glTF":
-        sys.exit("not a binary glTF")
+        raise ValueError("not a binary glTF (.glb) file")
     n = struct.unpack("<I", glb[12:16])[0]
     j = json.loads(glb[20:20 + n])
     binary = glb[20 + n + 8:]
     for node in j.get("nodes", []):
         if any(k in node for k in ("matrix", "rotation", "scale", "translation")):
-            sys.exit("node transforms aren't supported by this importer")
+            raise ValueError("node transforms aren't supported by this importer")
     if "KHR_draco_mesh_compression" in j.get("extensionsUsed", []):
-        sys.exit("Draco-compressed meshes aren't supported; export uncompressed")
+        raise ValueError("Draco-compressed meshes aren't supported; export uncompressed")
 
     def acc(i):
         a = j["accessors"][i]
@@ -194,17 +198,11 @@ def furniture(cen, normal, area, outline, floor_y):
     return objs
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("scan", type=Path)
-    ap.add_argument("--rotate", type=int, default=0, choices=range(4), help="extra quarter turns about the vertical")
-    ap.add_argument("--set-layout", action="store_true",
-                    help="also set data/layouts/current.json's polygon to the scanned outline (boards are kept)")
-    args = ap.parse_args()
-
-    glb = read_glb(args.scan)
+def import_room(raw: bytes, source: str, rotate: int = 0, data: Path = DATA) -> dict:
+    """Write data/scan/scan.glb + room.json from a .glb or .zip; returns room.json. Raises ValueError on bad input."""
+    glb = glb_of(raw)
     cen, normal, area = mesh_of(glb)
-    yaw = wall_yaw(normal, area) + args.rotate * math.pi / 2
+    yaw = wall_yaw(normal, area) + rotate * math.pi / 2
     cen, normal = rot_y(cen, yaw), rot_y(normal, yaw)
 
     floor_y = peak(cen[normal[:, 1] > 0.9, 1], area[normal[:, 1] > 0.9], cen[:, 1].min(), cen[:, 1].max())
@@ -215,24 +213,42 @@ def main():
     z0 = wall_line(cen, normal, area, 2, +1, high)
     z1 = wall_line(cen, normal, area, 2, -1, high)
     w, d = x1 - x0, z1 - z0
+    if not (1.0 < w < 50 and 1.0 < d < 50):
+        raise ValueError(f"couldn't find the room's walls (got {w:.1f} x {d:.1f} m)")
     objects = furniture(cen, normal, area, (x0, z0, x1, z1), floor_y)
 
     room = {
-        "source": args.scan.name, "kind": "mesh",
+        "source": source, "kind": "mesh", "rotate": rotate,
         "polygon": [[0, 0], [round(w, 3), 0], [round(w, 3), round(d, 3)], [0, round(d, 3)]],
         "ceiling_m": round(ceil_y - floor_y, 3),
         # view3d places the mesh with rotation.y = yaw, then position = -(x0, floor_y, z0).
         "transform": {"yaw": round(yaw, 6), "x0": round(x0, 4), "z0": round(z0, 4), "floor_y": round(floor_y, 4)},
         "objects": objects, "openings": [], "keep_nodes": [],
     }
-    out = DATA / "scan"
+    out = data / "scan"
     out.mkdir(parents=True, exist_ok=True)
     (out / "scan.glb").write_bytes(glb)
     (out / "room.json").write_text(json.dumps(room, indent=1), encoding="utf-8")
+    return room
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("scan", type=Path)
+    ap.add_argument("--rotate", type=int, default=0, choices=range(4), help="extra quarter turns about the vertical")
+    ap.add_argument("--set-layout", action="store_true",
+                    help="also set data/layouts/current.json's polygon to the scanned outline (boards are kept)")
+    args = ap.parse_args()
+
+    try:
+        room = import_room(args.scan.read_bytes(), args.scan.name, args.rotate)
+    except ValueError as exc:
+        sys.exit(str(exc))
+    w, d = room["polygon"][2]
     ft = 0.3048
-    print(f"room {w:.2f} x {d:.2f} m ({w / ft:.1f} x {d / ft:.1f} ft), ceiling {ceil_y - floor_y:.2f} m, "
-          f"walls rotated {math.degrees(yaw):.1f} deg")
-    for o in objects:
+    print(f"room {w:.2f} x {d:.2f} m ({w / ft:.1f} x {d / ft:.1f} ft), ceiling {room['ceiling_m']:.2f} m, "
+          f"walls rotated {math.degrees(room['transform']['yaw']):.1f} deg")
+    for o in room["objects"]:
         f = o["footprint"]
         print(f"  {o['name']:<14} x {f[0][0]:.2f}-{f[2][0]:.2f}  y {f[0][1]:.2f}-{f[2][1]:.2f}  h {o['height']:.2f}")
 
