@@ -1,6 +1,14 @@
 import { fileURLToPath } from 'node:url';
 import { AutoSubscribe, defineAgent, voice } from '@livekit/agents';
-import { realtime } from '@livekit/agents-plugin-openai';
+import * as google from '@livekit/agents-plugin-google';
+import * as openai from '@livekit/agents-plugin-openai';
+
+// The agent's voice brain: Gemini when GOOGLE_API_KEY is set (free tier at aistudio.google.com), else OpenAI.
+function voiceBrain() {
+  const real = k => k && !/YOUR_|paste-/.test(k);
+  if (real(process.env.GOOGLE_API_KEY)) return new google.realtime.RealtimeModel({ voice: 'Puck' });
+  return new openai.realtime.RealtimeModel({ model: 'gpt-realtime', voice: 'marin' });
+}
 import { runAgent } from './chert-rooms.mjs';
 import { greetOnBridgeReady } from './greet.mjs';
 import { instructionsFor, todayInTz, tools } from './moth-tools.mjs';   // room-history tools (Vultr API)
@@ -14,7 +22,7 @@ const agent = defineAgent({
     // paid model session. Doctor jobs may end without a caller ever joining.
     const caller = await ctx.waitForParticipant();
     const session = new voice.AgentSession({
-      llm: new realtime.RealtimeModel({ model: 'gpt-realtime', voice: 'marin' }),
+      llm: voiceBrain(),
     });
     ctx.addShutdownCallback(() => session.close());
     await session.start({
