@@ -17,6 +17,8 @@ import enum
 import math
 import random
 
+from room import as_room
+
 # Reserved, obviously-fake MAC prefix (locally-administered, documentation-style) so decoys can never be confused
 # with a real device and the UI can spot them: "02:00:DE:C0:..".  DE-C0 ~ "decoy".
 DECOY_PREFIX = "02:00:DE:C0"
@@ -39,11 +41,12 @@ class Decoy:
         self.heading = rng.uniform(-math.pi, math.pi)
         self._rng = rng
 
-    def step(self, dt, w, d):
+    def step(self, dt, w, d, room=None):
+        prev_x, prev_y = self.x, self.y
         self.heading += self._rng.uniform(-TURN, TURN) * dt
         self.x += math.cos(self.heading) * SPEED * dt
         self.y += math.sin(self.heading) * SPEED * dt
-        # Bounce off the walls so decoys stay in the room.
+        # Bounce off the bounding walls so decoys stay in the room.
         lo, hiw, hid = EDGE_MARGIN, max(w - EDGE_MARGIN, EDGE_MARGIN), max(d - EDGE_MARGIN, EDGE_MARGIN)
         if self.x < lo or self.x > hiw:
             self.x = min(max(self.x, lo), hiw)
@@ -51,6 +54,10 @@ class Decoy:
         if self.y < lo or self.y > hid:
             self.y = min(max(self.y, lo), hid)
             self.heading = -self.heading
+        # With a real room, also stay inside its shape and off the furniture: undo the step and turn away.
+        if room is not None and not room.ok(self.x, self.y):
+            self.x, self.y = prev_x, prev_y
+            self.heading += math.pi / 2 + self._rng.uniform(-0.3, 0.3)
 
 
 class Crowd:
@@ -71,23 +78,31 @@ class Crowd:
     def toggle(self):
         self.set(self.state is CrowdState.OFF)
 
-    def tick(self, t, room_size, center=None):
-        """Advance to time t. room_size: (w, d) metres. center: optional (x, y) to gather decoys around."""
-        w, d = room_size[0], room_size[1]
+    def tick(self, t, room, center=None):
+        """Advance to time t. `room`: a Room, or a (w, d) tuple for a plain rectangle. center: optional (x, y)
+        to gather the decoys around (e.g. the real person)."""
+        rm = as_room(room)
+        w, d = rm.w, rm.d
         if self.state is CrowdState.OFF:
             self._decoys = []
             self._last_t = t
             return
         if not self._decoys:
             self._decoys = [Decoy(i, w, d, self._rng) for i in range(self.count)]
-            if center:
-                for dec in self._decoys:   # start the crowd near the real person
-                    dec.x = min(max(center[0] + self._rng.uniform(-1.2, 1.2), EDGE_MARGIN), max(w - EDGE_MARGIN, EDGE_MARGIN))
-                    dec.y = min(max(center[1] + self._rng.uniform(-1.2, 1.2), EDGE_MARGIN), max(d - EDGE_MARGIN, EDGE_MARGIN))
+            for dec in self._decoys:   # place each at a spot a person could actually stand
+                spot = None
+                if center:
+                    for _ in range(20):   # try to gather near the real person first
+                        cx = min(max(center[0] + self._rng.uniform(-1.2, 1.2), EDGE_MARGIN), max(w - EDGE_MARGIN, EDGE_MARGIN))
+                        cy = min(max(center[1] + self._rng.uniform(-1.2, 1.2), EDGE_MARGIN), max(d - EDGE_MARGIN, EDGE_MARGIN))
+                        if rm.ok(cx, cy):
+                            spot = (cx, cy)
+                            break
+                dec.x, dec.y = spot or rm.random_point(self._rng)
         dt = 0.0 if self._last_t is None else max(0.0, min(t - self._last_t, 1.0))
         self._last_t = t
         for dec in self._decoys:
-            dec.step(dt, w, d)
+            dec.step(dt, w, d, room=rm)
 
     def snapshot(self):
         """Decoys for the snapshot. Empty when off. Every entry is flagged sim:True for the UI to label."""

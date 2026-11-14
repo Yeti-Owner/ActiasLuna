@@ -17,7 +17,8 @@ Standard library only. Stepped with the shared timestamp, never the wall clock, 
 
 import random
 
-from crowd import EDGE_MARGIN, Decoy  # reuse the wandering-dot motion
+from crowd import Decoy  # reuse the wandering-dot motion
+from room import as_room
 
 # Locally-administered, clearly-fake address blocks (the 0x02 bit marks "not a real vendor MAC").
 DECOY_PREFIX = "02:00:DE:C0"   # DE-C0 ~ "decoy"
@@ -51,23 +52,27 @@ class MacSim:
         self._last_t = None
         self.rotations = 0
 
-    def _ensure(self, w, d):
+    def _ensure(self, rm):
         if self._target is None:
+            w, d = rm.w, rm.d
             self._target = Decoy(0, w, d, self._rng)
+            self._target.x, self._target.y = rm.random_point(self._rng)
             self._target_mac = random_mac(TARGET_PREFIX, self._rng)
             self._next_rotate = self.rotate_s
             self._decoys = [Decoy(i + 1, w, d, self._rng) for i in range(self.n_decoys)]
             for dec in self._decoys:
                 dec.mac = random_mac(DECOY_PREFIX, self._rng)
+                dec.x, dec.y = rm.random_point(self._rng)
 
-    def tick(self, t, room_size):
-        w, d = room_size[0], room_size[1]
-        self._ensure(w, d)
+    def tick(self, t, room):
+        rm = as_room(room)
+        w, d = rm.w, rm.d
+        self._ensure(rm)
         dt = 0.0 if self._last_t is None else max(0.0, min(t - self._last_t, 1.0))
         self._last_t = t
-        self._target.step(dt, w, d)
+        self._target.step(dt, w, d, room=rm)
         for dec in self._decoys:
-            dec.step(dt, w, d)
+            dec.step(dt, w, d, room=rm)
         # Rotate the target's MAC on schedule: its trail resets, as if a new device appeared.
         if self.rotate_s > 0 and t >= self._next_rotate:
             self._target_mac = random_mac(TARGET_PREFIX, self._rng)

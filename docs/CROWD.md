@@ -63,6 +63,26 @@ Run `mock_crowd_server.py` alongside it to see the toggles land. `py -m pip inst
 Path A, approved by the group leader: a momentary push-button wired **D2 -> GND** (internal pull-up, no resistor).
 Each press sends the same crowd line. See `firmware/crowd_button/crowd_button.ino` (`BUTTON_PIN`, `DEBUG`).
 
+## Placing decoys in the real 3D room
+
+`server/room.py` loads the scanned room (the file the 3D view uses) so the decoys and MAC phones stand where a
+person actually could — inside the walls and off the furniture — in the same metres/frame as the ESP32 markers.
+
+- `Room.load("data/scan/room.json")` → a room with `size`, `ok(x, y)` (standable?) and `random_point(rng)`.
+- `crowd.tick(t, room, center=...)` and `macsim.tick(t, room)` now take a `Room` (or still a plain `(w, d)`
+  tuple). Decoys spawn on standable spots and won't walk through walls or sit on furniture.
+- The loader is tolerant (several key names for size/walls/furniture) and falls back to a plain rectangle, so it
+  won't crash the demo if the file differs.
+
+Preview it against any room file, no hardware:
+
+```
+py tools/preview_room.py data/scan/sample/room.json --count 10
+```
+
+**To match your exact file:** paste a snippet of your `room.json` (how size, walls and furniture are stored) and
+how the ESP32 marker positions are stored. If my loader misreads it, `preview_room.py` prints what it understood.
+
 ## MAC decoys + randomization (the "fake addresses" demo)
 
 `server/macsim.py` + `tools/sim_macspoof.py` make the privacy point behind Moth: tracking needs a *stable
