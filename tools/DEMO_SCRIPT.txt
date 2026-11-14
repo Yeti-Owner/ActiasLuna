@@ -1,0 +1,110 @@
+================================================================
+  MOTH - LIVE DEMO PRESENTATION SCRIPT
+  Read this while you present. [SAY] = talking points, [DO] = actions.
+  Target length: ~4-5 minutes. Keep it conversational, not word-for-word.
+================================================================
+
+WHO DOES WHAT (can be 1-3 people):
+  - OPERATOR  : drives the laptop / dashboard, narrates.
+  - WALKER    : holds the phone, walks around the room.
+  - BUTTON    : presses the Uno Q white button on cue (can be the Walker).
+
+BEFORE THE AUDIENCE ARRIVES (see tools/REAL_DEMO.txt for detail):
+  [ ] Boards powered, laptop on WATCHING-YOU (ipconfig shows 192.168.4.x)
+  [ ] Server running:  py tools/demo_run.py --button   -> dashboard http://127.0.0.1:8080
+  [ ] 3 board dots are GREEN, boards dragged to their real spots (Setup/Layout)
+  [ ] Phone joined WATCHING-YOU, calibration walk DONE, your dot shows and moves
+  [ ] Projector/screen mirrors the dashboard
+  Have a backup plan ready (see "IF IT BREAKS" at the bottom).
+
+----------------------------------------------------------------
+  SCENE 1 - THE HOOK  (~30s)
+----------------------------------------------------------------
+[SAY] "This is Moth. It finds where people are in a room using nothing but
+       Wi-Fi signal strength - no app, no GPS, no camera. Just a few $10 boards
+       and a laptop."
+[SAY] "It never reads any content - only the radio header: who sent a frame, on
+       what network, and how strong it was. That alone is enough to place you."
+[DO]  Show the dashboard / 3D room with the 3 board dots.
+[SAY] "These three dots are our Wi-Fi boards, mounted around the room. They're
+       the sensors - they don't move."
+
+----------------------------------------------------------------
+  SCENE 2 - LIVE TRACKING  (~60s)   <- the "wow"
+----------------------------------------------------------------
+[DO]  WALKER starts walking a slow loop, holding the phone.
+[SAY] "My phone joined the room's Wi-Fi. Watch the dot - that's me, being tracked
+       in real time by signal strength alone."
+[DO]  Point at the moving dot; let it track the walker for a few seconds.
+[SAY] "No app is reporting my location. The room is figuring it out from the
+       outside. This is what Wi-Fi can reveal about you without your help."
+  (If accuracy is rough, own it:)
+[SAY] "It's a quick calibration, so it's a bit jumpy - with a longer setup it
+       gets to about half a metre."
+
+----------------------------------------------------------------
+  SCENE 3 - THE PROBLEM  (~20s)
+----------------------------------------------------------------
+[SAY] "Here's the uncomfortable part: you didn't have to install anything to be
+       found. So how do you hide in a room that's watching the Wi-Fi?"
+[SAY] "Our answer: don't jam it, don't hack it - get lost in a crowd."
+
+----------------------------------------------------------------
+  SCENE 4 - THE DEFENSE: THE CROWD  (~60s)   <- the payoff
+----------------------------------------------------------------
+[DO]  BUTTON presses the Uno Q WHITE BUTTON.
+[SAY] "One button. Now the room sees a crowd of phones instead of just me."
+[DO]  Point out the burst of extra dots around the walker. The yellow
+      "SIMULATED crowd active" banner appears.
+[SAY] "Be honest about this: that crowd is SIMULATED - decoys we draw on the
+       screen. We are NOT transmitting fake signals into the air. It's a safe,
+       display-only demonstration of a real idea: a room full of similar devices
+       makes any one person hard to pick out."
+[DO]  WALKER keeps moving - ideally weave among the decoy dots.
+[SAY] "Which dot is me now? When I move with the crowd, my real position blends
+       in and gets lost in the noise. That's the whole point - more addresses in
+       the room means less certainty about any single person."
+[DO]  BUTTON presses the white button again -> crowd disappears.
+[SAY] "Button off - and I'm exposed again. On, I'm hidden. Off, I'm found."
+
+----------------------------------------------------------------
+  SCENE 5 - WHAT'S REAL vs WHAT'S SIMULATED  (~30s)  (keep it honest)
+----------------------------------------------------------------
+[SAY] "To be clear about what you just saw:"
+[SAY] "  REAL:      the tracking. Those boards really located me from Wi-Fi."
+[SAY] "  SIMULATED: the crowd. Those decoys are drawn in the view and labelled
+                    as simulated; nothing was broadcast and the real measurement
+                    was never touched."
+[SAY] "We did it the honest way on purpose - it shows the privacy concept
+       without building a tool that interferes with anyone else's network."
+
+----------------------------------------------------------------
+  SCENE 6 - CLOSE  (~20s)
+----------------------------------------------------------------
+[SAY] "So Moth shows two things: how much plain Wi-Fi can reveal about where you
+       are, and one honest way to take some of that back - disappear into a crowd."
+[SAY] "Hardware: three ESP32 boards and an Arduino for the button. Everything
+       runs offline on this laptop. Happy to take questions."
+
+LIKELY QUESTIONS (have an answer ready):
+  Q: Can it read my messages?       A: No - only the radio header, never content.
+  Q: Does the crowd really jam Wi-Fi? A: No - it's a simulated, display-only
+                                         demo; nothing is transmitted.
+  Q: Does it need my permission?     A: In connected mode you choose to join the
+                                         network; leave it and you disappear.
+  Q: How accurate?                   A: ~0.5 m with a full calibration; rougher
+                                         in a quick demo setup.
+
+----------------------------------------------------------------
+  IF IT BREAKS (stay calm, keep talking)
+----------------------------------------------------------------
+  - Dot won't track / boards grey -> narrate from the 3D room + go straight to
+    the crowd button (decoys still appear even without live tracking). See
+    DEMO_STEPS.txt for the real fix (usually not on 192.168.4.x, or firewall).
+  - Nothing works at all -> fall back to the simulator so the show still runs:
+        py tools/demo_run.py --sim --button
+    This gives a moving "SimPhone" + the crowd, no hardware needed. Just tell the
+    audience it's running on simulated data.
+  - Phone page won't load -> wrong IP or you used http:// (needs https://<laptop
+    192.168.4.x>:8081) - skip it and demo with the dot already tracking.
+================================================================
