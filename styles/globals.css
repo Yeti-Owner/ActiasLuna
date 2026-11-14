@@ -45,3 +45,39 @@ code, kbd, samp, pre, .font-mono {
   background-color: #8FD3A5;
   color: #12301D;
 }
+
+@keyframes sun-breathe {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+    filter: drop-shadow(0 0 20px rgba(253, 224, 71, 0.45)) drop-shadow(0 0 50px rgba(245, 158, 11, 0.25));
+  }
+  50% {
+    transform: translateY(-5px) scale(1.02);
+    filter: drop-shadow(0 0 32px rgba(253, 224, 71, 0.65)) drop-shadow(0 0 75px rgba(245, 158, 11, 0.4));
+  }
+}
+
+.animate-sun {
+  animation: sun-breathe 7s ease-in-out infinite;
+}
+
+@keyframes sun-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-sun-peek {
+  animation: sun-spin 120s linear infinite;
+  transform-origin: center center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-sun,
+  .animate-sun-peek {
+    animation: none;
+  }
+}

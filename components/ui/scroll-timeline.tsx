@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import mothImg from "@/public/moth-guide.png";
+import mothImg from "@/public/moth-luna/moth.png";
 
 export interface Milestone {
   id: string;
@@ -66,12 +66,13 @@ export default function Component({ milestones }: TimelineProps) {
           style={{ height: `${scrollProgress * 100}%` }}
         />
 
-        {/* Flying Luna Moth Indicator that glides along the timeline */}
+        {/* Flying Luna Moth Indicator centered precisely on the timeline vertical bar */}
         <div
-          className="absolute left-0 z-30 -translate-x-1/2 transition-all duration-300 ease-out pointer-events-none"
+          className="absolute left-0 z-30 pointer-events-none transition-all duration-300 ease-out flex items-center justify-center w-12 h-12 -ml-6 -mt-6"
           style={{
             top: `${scrollProgress * 100}%`,
-            transform: `translate(-50%, -50%) rotate(${scrollDirection === "down" ? "180deg" : "0deg"})`,
+            transform: `rotate(${scrollDirection === "down" ? "180deg" : "0deg"})`,
+            transformOrigin: "center center",
           }}
         >
           <div className="relative flex items-center justify-center">
@@ -82,7 +83,7 @@ export default function Component({ milestones }: TimelineProps) {
             <img
               src={mothImg}
               alt="Actias Luna scroll guide"
-              className="relative w-9 h-9 md:w-12 md:h-12 object-contain drop-shadow-[0_0_10px_rgba(143,211,165,0.7)] transition-transform duration-300"
+              className="relative w-10 h-10 md:w-12 md:h-12 object-contain drop-shadow-[0_0_10px_rgba(143,211,165,0.7)] transition-transform duration-300"
               style={{
                 filter: "brightness(1.1) drop-shadow(0 0 6px rgba(143,211,165,0.8))",
               }}
