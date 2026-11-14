@@ -11,7 +11,8 @@ from crowd import Crowd  # noqa: E402
 from macsim import MacSim  # noqa: E402
 from room import Room, as_room  # noqa: E402
 
-SAMPLE = ROOT / "data" / "scan" / "sample" / "room.json"
+# Same shape tools/import_scan.py writes to data/scan/room.json (data/ is gitignored, so the fixture lives here).
+SAMPLE = ROOT / "tests" / "fixtures" / "room_sample.json"
 
 
 class RoomTest(unittest.TestCase):
@@ -47,6 +48,14 @@ class RoomTest(unittest.TestCase):
                                       {"a": [4, 3], "b": [0, 3]}, {"a": [0, 3], "b": [0, 0]}]})
         self.assertAlmostEqual(r.w, 4)
         self.assertAlmostEqual(r.d, 3)
+
+    def test_polygon_origin_shifts_footprints(self):
+        r = Room.from_dict({"polygon": [[1, 2], [5, 2], [5, 5], [1, 5]],
+                            "objects": [{"label": "Desk", "footprint": [[1, 2], [2, 2], [2, 3], [1, 3]]}]})
+        self.assertAlmostEqual(r.w, 4)
+        self.assertAlmostEqual(r.d, 3)
+        self.assertAlmostEqual(r.objects[0]["x"], 0.5)
+        self.assertAlmostEqual(r.objects[0]["y"], 0.5)
 
     def test_bad_room_raises(self):
         with self.assertRaises(ValueError):

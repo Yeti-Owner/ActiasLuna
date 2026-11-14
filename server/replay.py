@@ -48,7 +48,8 @@ def load_session(path: Path):
 def apply(tr: Tracker, line: dict):
     """Turn one recorded line back into tracker calls. The only place this happens (Replay and lab.py share it).
 
-    Line kinds: {"rt", "meta": {...}}, {"rt", "motion": {"m", "mv", "st", "hd"}} and {"rt", "src", "p": packet}.
+    Line kinds: {"rt", "meta": {...}}, {"rt", "motion": {"m", "mv", "st", "hd"}}, {"rt", "anchor": {"m", "x", "y"}}
+    and {"rt", "src", "p": packet}.
     """
     if "meta" in line:
         tr.laptop_ip = (line["meta"] or {}).get("laptop_ip")
@@ -57,6 +58,9 @@ def apply(tr: Tracker, line: dict):
         hd = mo.get("hd")
         tr.set_motion(str(mo.get("m", "")), int(mo.get("mv", 0)), int(mo.get("st", 0)), line["rt"],
                       float(hd) if isinstance(hd, (int, float)) else None)
+    elif "anchor" in line:
+        an = line["anchor"] or {}
+        tr.anchor(str(an.get("m", "")), float(an["x"]), float(an["y"]), line["rt"])
     else:
         tr.ingest(line.get("p"), line["rt"], (line.get("src", ""), 0))
 
@@ -89,12 +93,11 @@ class Replay:
     act at once. Lines before `start` seconds are fed without delay (seek); long recording gaps are capped at MAX_GAP_S.
     """
 
-    def __init__(self, fname: str, header: dict, lines: list, lock, get_ctx, boards, speed: float, start: float,
-                 hidden=()):
+    def __init__(self, fname: str, header: dict, lines: list, lock, get_ctx, boards, speed: float, start: float):
         self.file = fname
         self.pkts = lines
         self.lock = lock
-        self.tracker = Tracker(get_ctx, boards, hidden)
+        self.tracker = Tracker(get_ctx, boards)
         self.speed = max(0.01, speed)
         self.t0, self.t1 = lines[0]["rt"], lines[-1]["rt"]
         self.pos = self.t0

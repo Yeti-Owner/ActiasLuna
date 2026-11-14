@@ -32,7 +32,6 @@ class Room:
     def size(self):
         return (self.w, self.d, self.h)
 
-    # ---- loading -------------------------------------------------------------------------------------------------
     @classmethod
     def load(cls, path):
         with open(path, encoding="utf-8") as f:
@@ -49,6 +48,19 @@ class Room:
             h = _num(size[2]) if len(size) > 2 else None
         elif isinstance(size, dict):
             w, d, h = _num(size.get("w") or size.get("x")), _num(size.get("d") or size.get("y")), _num(size.get("h"))
+
+        # tools/import_scan.py writes the outline as `polygon` in the layout frame. The room's frame starts at the
+        # polygon's min corner, so footprints below are shifted by the same origin.
+        x0 = y0 = 0.0
+        poly = [p for p in (data.get("polygon") or []) if isinstance(p, (list, tuple)) and len(p) >= 2]
+        poly = [(_num(p[0]), _num(p[1])) for p in poly]
+        poly = [p for p in poly if None not in p]
+        if len(poly) >= 3:
+            xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+            x0, y0 = min(xs), min(ys)
+            if w is None or d is None:
+                w, d = max(xs) - x0, max(ys) - y0
+        h = h or _num(data.get("ceiling_m"))
 
         walls = data.get("walls") or []
         if (w is None or d is None) and walls:   # derive bounds from wall endpoints
@@ -67,6 +79,17 @@ class Room:
 
         objects = []
         for o in (data.get("objects") or data.get("furniture") or []):
+            if not isinstance(o, dict):
+                continue
+            fp = [(_num(p[0]), _num(p[1])) for p in (o.get("footprint") or [])
+                  if isinstance(p, (list, tuple)) and len(p) >= 2]
+            fp = [p for p in fp if None not in p]
+            if len(fp) >= 3:   # import_scan footprint polygon -> its axis-aligned box (conservative if rotated)
+                fx, fy = [p[0] for p in fp], [p[1] for p in fp]
+                objects.append({"x": (min(fx) + max(fx)) / 2 - x0, "y": (min(fy) + max(fy)) / 2 - y0,
+                                "w": max(fx) - min(fx), "d": max(fy) - min(fy), "yaw": 0.0,
+                                "kind": o.get("label") or o.get("kind", "object")})
+                continue
             ox, oy = _num(o.get("x", o.get("cx"))), _num(o.get("y", o.get("cy")))
             ow, od = _num(o.get("w", o.get("width"))), _num(o.get("d", o.get("depth")))
             if None not in (ox, oy, ow, od):
@@ -82,7 +105,6 @@ class Room:
         """A plain empty room, the fallback when there's no scan."""
         return cls(w, d, h)
 
-    # ---- geometry ------------------------------------------------------------------------------------------------
     def on_furniture(self, x, y, pad=FURNITURE_PAD):
         """True if (x, y) is over a furniture footprint, grown by `pad` metres. pad=0 is the real footprint."""
         for o in self.objects:

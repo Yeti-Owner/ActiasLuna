@@ -14,8 +14,8 @@
   <div class="spacer"></div>
   <span id="recBadge" class="badge"></span>
   <button id="dimTog">3D view</button>
-  <button id="viewTog">Show replay</button>
-  <button id="modeTog">Setup &amp; debug</button>
+  <button id="viewTog" class="adv">Show replay</button>
+  <button id="modeTog" class="quiet">Advanced</button>
 </header>
 <main>
   <section id="left">
@@ -63,7 +63,7 @@
     </nav>
 
     <div id="tLayout" class="tab">
-      <label class="tog"><input type="checkbox" id="editTog"> Edit (drag boards and room corners)</label>
+      <p class="small muted">Drag boards and room corners on the map; Save layout keeps the changes.</p>
       <div class="row">Room <input id="roomW" type="number" step="0.5" min="3" value="10"> ft ×
         <input id="roomH" type="number" step="0.5" min="3" value="11"> ft <button id="roomRect">Make rectangle</button></div>
       <div class="row"><button id="addVert">Add corner</button><button id="delVert">Remove selected corner</button></div>
@@ -71,7 +71,7 @@
       <div id="rxPlace"></div>
       <div class="row"><button id="planBtn">Suggest board spots</button><button id="planUse" class="hidden">Use these</button><button id="planHide" class="hidden">Hide</button></div>
       <div id="planMsg" class="small"></div>
-      <div class="row"><button id="saveLayout" class="primary">Save layout</button><span id="layoutMsg" class="small"></span></div>
+      <div class="row"><button id="saveLayout" class="primary">Save layout</button><button id="undoLayout">Undo changes</button><span id="layoutMsg" class="small"></span></div>
       <p class="small muted">Measure from one room corner (0,0, top-left on the map) to each board with a tape or a phone
         measuring app. Six inches either way is fine. Saving rebuilds the radio map.</p>
     </div>
@@ -79,9 +79,11 @@
     <div id="tCal" class="tab hidden">
       <div id="phoneCal" class="small callout"></div>
       <ol class="small steps">
-        <li>On a phone joined to the demo network, open the address above and enter the PIN. Tap <b>Turn on motion</b>.</li>
-        <li><b>1 · Walk</b>: follow the numbered dots (roughly two minutes). Doing it twice helps.</li>
-        <li><b>2 · Check</b>: stand on each blue square for 8 seconds to measure the real error.</li>
+        <li>On a phone joined to the demo network, open the address above.</li>
+        <li>Stand somewhere, tap that spot on the phone's map and press <b>I'm here</b> (hold still 8 s). Each mark first
+          measures how far off the map was there, then teaches it that spot.</li>
+        <li>Walk straight to the next amber ring and repeat until the room is covered. The walks in between teach the
+          compass and stride. <span class="muted">(A guided walk is under More.)</span></li>
       </ol>
       <h4>Accuracy</h4>
       <div id="calQual" class="small"></div>
@@ -96,7 +98,7 @@
     <div id="tSet" class="tab hidden">
       <div id="setList"></div>
       <h4>Which settings actually help?</h4>
-      <p class="small muted">Walk and do the checks on the phone while recording (on by default). This replays those
+      <p class="small muted">Mark spots on the phone while recording (on by default). This replays those
         recordings with each setting flipped and scores them against where you really were. About a minute.</p>
       <div class="row"><button id="labRun" class="primary">Measure on my recordings</button></div>
       <div id="labOut" class="small"></div>
@@ -116,14 +118,45 @@
   <section id="simple">
     <h3>People</h3>
     <div id="sPeople"></div>
-    <h3>Boards</h3>
-    <div id="sRx"></div>
-    <div id="sHint" class="small muted"></div>
-    <div class="slegend small muted">
-      <div><i class="lg est"></i>located (they're somewhere in the shaded disc)</div>
-      <div><i class="lg weak"></i>rough (fewer than 3 boards hear them)</div>
-      <div><i class="lg stale"></i>not heard lately</div>
-    </div>
+
+    <h3>Setup</h3>
+    <details class="step" id="stRoom">
+      <summary><span class="ck"></span><b>Room</b><span class="sum" id="roomSum"></span></summary>
+      <div class="row"><label class="btn primary">Import room scan…<input type="file" id="scanFile" accept=".glb,.zip" hidden></label>
+        <button id="scanTurn" class="hidden" title="Use if corner (0, 0) of the scan isn't the corner you measure boards from">Turn 90°</button></div>
+      <div class="small muted">A .glb (or a .zip holding one) from a phone LiDAR scanner. Sets the room size and furniture and
+        shows it in 3D.</div>
+      <div class="row small">Or set the size: <input id="sRoomW" type="number" step="0.5" min="3"> ×
+        <input id="sRoomH" type="number" step="0.5" min="3"> ft <button id="sRoomSet">Set</button></div>
+      <div id="scanMsg" class="small"></div>
+    </details>
+
+    <details class="step" id="stBoards">
+      <summary><span class="ck"></span><b>Boards</b><span class="sum" id="boardsSum"></span></summary>
+      <div id="sPlace"></div>
+      <div class="small muted">Drag a board on the map, or type its distance from the top-left corner (0, 0). Six inches
+        either way is fine.</div>
+      <div class="row"><button id="sSuggest">Suggest spots</button><button id="sPlanUse" class="hidden">Use these</button>
+        <span class="spacer"></span><button id="sUndo" class="hidden">Undo</button><button id="sSave" class="primary hidden">Save</button></div>
+      <div id="sPlanMsg" class="small"></div>
+    </details>
+
+    <details class="step" id="stCal">
+      <summary><span class="ck"></span><b>Calibrate</b><span class="sum" id="calSum"></span></summary>
+      <div id="sPhoneUrl" class="small callout"></div>
+      <ol class="small steps">
+        <li>Stand somewhere, tap that spot on the phone's map and press <b>I'm here</b>. Hold still 8 s.</li>
+        <li>Walk to the next amber ring and repeat until the room is covered.</li>
+      </ol>
+      <div id="sCalQual" class="small"></div>
+      <button id="sCalClear" class="small quiet">Start calibration over</button>
+    </details>
+
+    <details id="tuning">
+      <summary><b>Tuning</b><span class="sum" id="tuneSum"></span></summary>
+      <div id="sSet"></div>
+      <button id="setReset" class="small hidden">Back to recommended</button>
+    </details>
   </section>
 </main>
 <script src="/static/app.js"></script>

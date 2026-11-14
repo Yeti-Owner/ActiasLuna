@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "@/*": ["./*"],
+      "geist/font/sans": ["./src/fonts/sans.ts"],
+      "geist/font/mono": ["./src/fonts/mono.ts"],
+      "geist/font/pixel/variable": ["./src/fonts/pixel-variable.ts"],
+      "geist/font/pixel": ["./src/fonts/pixel.ts"],
+      "geist/font/serif": ["./src/fonts/serif.ts"]
+    }
+  },
+  "include": ["src", "components", "pages", "*.tsx", "*.ts", "*.d.ts"]
+}

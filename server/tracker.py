@@ -14,7 +14,7 @@ import radiomap as rmap
 import sensing
 import settings as cfg
 import phone_filter
-from display import Crowd, PointSmoother
+from display import PointSmoother
 
 STALE_S = 3.0
 LOST_S = 60.0
@@ -47,8 +47,10 @@ RADIO_OFF_DB = 1.6
 RADIO_MIN_PKTS = 4
 RADIO_MIN_FRAMES = 6
 # Only the radio says moving while the phone says still: a slow walk, or a turn on the spot re-reading one fade, so
-# those readings count half.
+# those readings count half. Hand sway alone exceeds RADIO_ON_DB on 44% of standing ticks (vs 88% of walking ones,
+# measured on recorded marks and legs), so overruling the phone's "still" needs RADIO_OVERRULE_DB (2% of standing).
 RADIO_ONLY_STRENGTH = 0.5
+RADIO_OVERRULE_DB = 4.5
 STRIDE_M = 0.7
 RECEIVERS_S = 2.0
 # A window with this many packets from one board (a dwell) uses the median packet so a passer-by's brief shadow
@@ -58,7 +60,8 @@ MEDIAN_MIN_PKTS = 6
 CSI_MOVE_RATIO = 1.8
 # Weight of the device-free log-likelihood added to a phone's; only used with exactly one phone present.
 FUSE_W = 0.5
-BODY_MAC = "body"
+# Per-phone motion reports kept so the walk between two "I'm here" marks can be cut out (App._finish_mark).
+MOTION_LOG_S = 120.0
 
 
 def fmt_mac(mac: str) -> str:
@@ -143,14 +146,12 @@ class Phone:
         self.last_trail_t = 0.0
         self.steps_seen: Optional[int] = None
         self.radio_mv = -1
+        self.radio_db = 0.0
 
 
 class Tracker:
-    def __init__(self, get_ctx: Callable[[], dict], boards: List[dict], hidden=()):
+    def __init__(self, get_ctx: Callable[[], dict], boards: List[dict]):
         self.get_ctx = get_ctx
-        # Crowd-button boards: never shown as a receiver, station, phone or in events.
-        self.hidden = {str(m).lower() for m in hidden}
-        self.crowd = Crowd()
         self.labels = {str(b.get("base_mac", "")).lower(): b.get("label", "") for b in boards}
         self.nodes: Dict[str, Node] = {}
         self.stations: Dict[str, dict] = {}
@@ -167,6 +168,8 @@ class Tracker:
         self.bad_packets = 0
         # mac -> {"mv": 0|1, "st": steps, "hd": compass deg or None, "t": rt} from the phone page (/api/motion).
         self.motion_reports: Dict[str, dict] = {}
+        # mac -> deque of [rt, steps, compass deg or None, moving]; the last MOTION_LOG_S of reports.
+        self.motion_log: Dict[str, deque] = {}
         self.sense = sensing.LinkBuffer()
         self.person = sensing.Person()
         self.body: Optional[dict] = None
@@ -185,8 +188,8 @@ class Tracker:
         return {n.ifm: n.id for n in self.nodes.values() if n.ifm}
 
     def excluded(self) -> set:
-        """Never tracked as phones: boards (id and on-air MAC), the laptop (by its IP) and hidden MACs."""
-        out = set(self.hidden)
+        """Never tracked as phones: boards (id and on-air MAC) and the laptop (by its IP)."""
+        out = set()
         for node in self.nodes.values():
             out.add(node.id)
             if node.ifm:
@@ -194,17 +197,6 @@ class Tracker:
         if self.laptop_ip:
             out.update(m for m, s in self.stations.items() if s.get("ip") == self.laptop_ip)
         return out
-
-    def _crowd(self, pkt: dict):
-        mac = str(pkt.get("id", "")).lower()
-        if mac and mac not in self.hidden:
-            self.hidden.add(mac)
-            self.stations.pop(mac, None)
-            self.phones.pop(mac, None)
-            tag = fmt_mac(mac)
-            self.events = deque((e for e in self.events if tag not in e[1]), maxlen=self.events.maxlen)
-        if pkt.get("on") in (0, 1):
-            self.crowd.set(bool(pkt["on"]))
 
     def _link(self, tx: str, rx: str, rssi: float, frames: int):
         """links[(tx, rx)] = [slow baseline dBm, frames seen, fast level dBm]."""
@@ -248,9 +240,6 @@ class Tracker:
             self.bad_packets += 1
             return
         kind = pkt.get("t")
-        if kind == "crowd":
-            self._crowd(pkt)
-            return
         node = self.nodes.get(nid)
         if node is None:
             node = self.nodes[nid] = Node(nid)
@@ -274,8 +263,7 @@ class Tracker:
         elif kind == "sta":
             self._stations(pkt, rt)
         elif kind == "ev":
-            if str(pkt.get("m", "")).lower() not in self.hidden:
-                self._event(rt, f"{pkt.get('e')} {fmt_mac(pkt.get('m', '000000000000'))} reason={pkt.get('reason')}")
+            self._event(rt, f"{pkt.get('e')} {fmt_mac(pkt.get('m', '000000000000'))} reason={pkt.get('reason')}")
         node.prune(rt)
 
     def _telemetry(self, node: Node, pkt: dict, rt: float):
@@ -296,7 +284,7 @@ class Tracker:
         current = {}
         for entry in pkt.get("sta") or []:
             mac = str(entry.get("m", "")).lower()
-            if mac and mac not in self.hidden:
+            if mac:
                 current[mac] = {"ip": entry.get("ip"), "r": entry.get("r"), "nm": entry.get("nm", ""), "t": rt}
         for mac in current:
             if mac not in self.stations:
@@ -367,6 +355,7 @@ class Tracker:
             mean = sum(r for r, _ in rows) / len(rows)
             excess = sum((r - mean) ** 2 for r, _ in rows) / len(rows) - sum(se2 for _, se2 in rows) / len(rows)
             jitter.append(math.sqrt(max(0.0, excess)))
+        ph.radio_db = max(jitter, default=0.0)
         if len(jitter) < 2:
             ph.radio_mv = -1
         elif max(jitter) > RADIO_ON_DB:
@@ -418,10 +407,25 @@ class Tracker:
 
     def set_motion(self, mac: str, mv: int, steps: int, rt: float, hd: Optional[float] = None):
         self.motion_reports[mac] = {"mv": 1 if mv else 0, "st": steps, "hd": hd, "t": rt}
+        log = self.motion_log.setdefault(mac, deque())
+        log.append([rt, steps, hd, 1 if mv else 0])
+        while log and rt - log[0][0] > MOTION_LOG_S:
+            log.popleft()
         cap = self.capture
-        if cap and cap["kind"] == "walk" and cap["phone"] == mac and capture_phase(cap, rt) == "recording":
-            # [t, steps, compass deg, moving]: walkcal reconstructs where the walker actually was from these.
+        if cap and cap["kind"] in ("walk", "mark") and cap["phone"] == mac and capture_phase(cap, rt) == "recording":
+            # [t, steps, compass deg, moving]: walkcal reconstructs where the walker was; marks drop moving stretches.
             cap.setdefault("motion", []).append([round(rt - cap["t0"], 3), steps, hd, 1 if mv else 0])
+
+    def motion_between(self, mac: str, t0: float, t1: float) -> List[list]:
+        """Logged reports with t0 <= rt <= t1 as [rt - t0, steps, compass, moving] (walkcal.leg_fit's shape)."""
+        return [[round(r[0] - t0, 3)] + r[1:] for r in self.motion_log.get(mac, ()) if t0 <= r[0] <= t1]
+
+    def anchor(self, mac: str, x: float, y: float, t: float):
+        """The holder marked where they stand ("mark_anchor" setting). Recorded, so replays do the same."""
+        ctx = self.get_ctx()
+        ph, m = self.phones.get(mac), ctx.get("map")
+        if ph and m and cfg.merged(ctx.get("settings"))["mark_anchor"]:
+            ph.track.pin(m, x, y, t)
 
     def fresh_report(self, mac: str) -> Optional[dict]:
         report = self.motion_reports.get(mac)
@@ -523,17 +527,21 @@ class Tracker:
         facing = self._facing(mac, ctx) if use_motion else None
         steps = self._new_steps(ph, mac) if use_motion else 0
         # The radio may overrule the phone's "still" (phones miss slow walks); it never overrules "moving".
-        strength = 1.0
+        strength, creep = 1.0, True
         if st["radio_motion"] and mv != 1 and steps == 0:
             radio = self.radio_motion(ph, t)
+            if mv == 0 and radio == 1 and ph.radio_db <= RADIO_OVERRULE_DB:
+                radio = 0
             if mv == 0 and radio == 1:
-                strength = RADIO_ONLY_STRENGTH
+                # Can still be sway or a turn on the spot: weaken the dwell, but never creep along the compass on the
+                # radio's word alone.
+                strength, creep = RADIO_ONLY_STRENGTH, False
             if mv == -1 or radio == 1:
                 mv = radio
         extra = [FUSE_W * v for v in fuse] if fuse is not None else None
         result = ph.track.step(m, t, lambda t0, t1: self.window(ph, t0, t1), mv, steps, facing,
                                float(ctx.get("stride") or STRIDE_M), st["pdr"], st["shadow_guard"],
-                               strength=strength, extra=extra, holder_facing=facing)
+                               strength=strength, extra=extra, holder_facing=facing, creep=creep)
         ph.receivers = len(m.usable(self.window(ph, t - RECEIVERS_S, t)))
         if result:
             ph.raw = result
@@ -561,17 +569,11 @@ class Tracker:
             if not self._phone_tick(mac, self.phones[mac], t, ctx, st, m, fuse):
                 del self.phones[mac]
         self._capture_tick(t)
-        layout = ctx.get("layout") or {}
-        self.crowd.step(t, layout.get("polygon"), ctx.get("objects") or [])
 
     def _trail(self, ph: Phone, m, t: float):
         kind = ph.status.value
         ph.recent = []
-        last = ph.last_trail_t
-        for ts, x, y, unc in ph.track.smoothed(m):
-            if ts - last < TRAIL_STEP_S:
-                continue
-            last = ts
+        for ts, x, y, unc in ph.track.smoothed(m, ph.last_trail_t, TRAIL_STEP_S):
             point = [round(ts, 2), round(x, 3), round(y, 3), round(unc, 3), kind]
             if ts <= t - phone_filter.SMOOTH_LAG_S + 0.3:
                 ph.trail.append(point)
@@ -580,8 +582,9 @@ class Tracker:
                 ph.recent.append(point)
 
     def start_capture(self, kind: str, phone: str, x: float, y: float, orientation: str, duration: float, t: float):
-        """Kinds: "calibrate"/"test" stand at (x, y) for duration; "walk" runs until stop_walk() and collects
-        marks [t_rel, x, y] from the phone page (truth between marks is reconstructed by walkcal)."""
+        """Kinds: "calibrate"/"test"/"mark" stand at (x, y) for duration ("mark" also keeps motion reports so moving
+        stretches can be dropped); "walk" runs until stop_walk() and collects marks [t_rel, x, y] from the phone page
+        (truth between marks is reconstructed by walkcal)."""
         self.capture = {"kind": kind, "phone": phone.lower(), "x": x, "y": y, "orientation": orientation,
                         "duration": duration, "t0": t, "samples": [], "marks": [], "stop": False}
 
@@ -680,7 +683,6 @@ class Tracker:
             "dropped_unassoc": self.dropped_unassoc, "laptop_ip": self.laptop_ip,
             "events": list(self.events)[-25:], "packets": self.packets, "bad_packets": self.bad_packets,
             "body": dict(self.body, trail=list(self.body_trail)) if self.body else None,
-            "crowd": self.crowd.snapshot(),
         }
         cap = self.capture
         if cap:

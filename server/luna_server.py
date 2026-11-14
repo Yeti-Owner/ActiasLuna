@@ -2,7 +2,7 @@
 
 Threads: udp_loop (ingest), subscribe_loop (LUNA_SUB to boards every second), tick_loop (estimator at 4 Hz), HTTP
 handlers, plus replay and evaluation workers. All shared state is guarded by App.lock. The dashboard binds to
-127.0.0.1 only; the phone page listens on the demo subnet behind a PIN. LUNA_DATA overrides the data directory.
+127.0.0.1 only; the phone page answers only the demo subnet. LUNA_DATA overrides the data directory.
 """
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import argparse
 import json
 import math
 import os
-import random
 import re
 import socket
 import ssl
@@ -18,12 +17,15 @@ import sys
 import threading
 import time
 import traceback
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(1, str(Path(__file__).resolve().parents[1] / "tools"))
 
+import import_scan  # noqa: E402
 import lab  # noqa: E402
 import planner  # noqa: E402
 import radiomap as rmap  # noqa: E402
@@ -31,8 +33,9 @@ import sensing  # noqa: E402
 import settings as cfg  # noqa: E402
 import walkcal  # noqa: E402
 from replay import TICK_S, Replay, load_session  # noqa: E402
-from tracker import Tracker, capture_phase  # noqa: E402
-from crowd import Crowd  # noqa: E402  Nick: honest, display-only decoy crowd (never transmits)
+from crowd import Crowd, jam_offset  # noqa: E402
+from room import Room  # noqa: E402
+from tracker import Status, Tracker, capture_phase, fmt_mac  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get("LUNA_DATA", ROOT / "data"))
@@ -46,9 +49,20 @@ ORIENTATIONS = ("hand", "front_pocket", "back_pocket", "bag")
 EMPTY_LEAVE_S = 15.0
 EMPTY_S = 30.0
 SCAN_MATCH_M = 0.3
-PIN_TRIES = 8
-PIN_LOCK_S = 60.0
+SCAN_MAX_BYTES = 300 << 20
 BUSY = (409, "a capture is already running")
+# "I'm here": MARK_DELAY_S lets the hand settle after the tap, then MARK_S of standing readings. Stretches the phone
+# reports moving (MARK_MOVE_PAD_S either side, reports lag the motion) are dropped; under MARK_MIN_S left, or under 2
+# boards with MARK_MIN_FRAMES, the mark is refused rather than training the map on a wrong position.
+MARK_DELAY_S = 1.0
+MARK_S = 8.0
+MARK_MIN_S = 4.0
+MARK_MOVE_PAD_S = 0.75
+MARK_MIN_FRAMES = 10
+# Someone passing between the phone and a board only weakens it: a board's packets more than MARK_SHADOW_DB under its
+# median over the mark are that, not the spot, and are dropped.
+MARK_SHADOW_DB = 6.0
+LEGS_KEEP = 400
 
 FT = rmap.FT
 DEFAULT_LAYOUT = {
@@ -149,14 +163,11 @@ class App:
         self.map_links = {}
         self.evaluation = None
         self._eval_gen = 0
-        # MACs of crowd-button boards, hidden from the moment the server starts.
-        self.crowd_macs = read_json(ROOT / "config" / "crowd.json", {}).get("macs", [])
-        self.live = Tracker(self.ctx, self.boards, self.crowd_macs)
+        self.live = Tracker(self.ctx, self.boards)
         self.live.on_capture_done = self._capture_done
-        # Nick: simulated decoy crowd for the "multiple fake addresses" demo. Display-only -- it never transmits and
-        # never touches the Wi-Fi estimate; it just adds clearly-labelled sim markers to the 3D view, toggled by the
-        # Uno Q button. See server/crowd.py.
+        # Display-only decoy phones for the 3D view, toggled by the Uno Q button or /api/crowd (crowd.py).
         self.decoys = Crowd()
+        self.decoy_room = None
         self._decoy_origin = (0.0, 0.0)
         self.rec_file = None
         self.rec_path = None
@@ -171,14 +182,13 @@ class App:
         self.known_nodes = set()
         self.sock = None
         self._snap_cache = {}
-        # Persisted so a restart doesn't log out phones that already entered it.
-        self.pin = str(self.state.get("phone_pin") or f"{random.SystemRandom().randrange(10000):04d}")
-        if self.state.get("phone_pin") != self.pin:
-            self.state["phone_pin"] = self.pin
-            write_json(DATA / "state.json", self.state)
-        self.pin_fail = {}
         self.phone_port = None
         self.phone_https = False
+        self._plan_cache = (None, [])
+        # mac -> (rt, x, y) where that phone's last accepted mark ended; the next mark's leg starts there.
+        self.last_mark = {}
+        # mac -> outcome of that phone's latest mark, shown on its page (phone_state "result").
+        self.mark_results = {}
         self._rebuild()
 
     @staticmethod
@@ -202,11 +212,17 @@ class App:
         # agreement]}; stride: metres per counted step. See sensing.py and walkcal.py.
         calib.setdefault("df_walk", [])
         calib.setdefault("heading", {})
-        # Raw walk captures. Walk spots, heading and stride derive from them, so a new walkcal.VERSION rebuilds them
-        # here instead of asking for another walk.
+        # Raw walk captures. Walk spots, heading and stride derive from them (and from legs), so a new walkcal.VERSION
+        # rebuilds them here instead of asking for another walk.
         calib.setdefault("walks", [])
-        if calib["walks"] and calib.get("walkcal_v") != walkcal.VERSION:
-            self._derive_walks(calib)
+        # Walks between consecutive "I'm here" marks: compass and stride only (walkcal.leg_fit).
+        calib.setdefault("legs", [])
+        if calib.get("walkcal_v") != walkcal.VERSION:
+            if calib["walks"]:
+                self._derive_walks(calib)
+            elif calib["legs"]:
+                self._refit_motion(calib)
+                calib["walkcal_v"] = walkcal.VERSION
         return calib
 
     @staticmethod
@@ -215,17 +231,24 @@ class App:
         calib["spots"] = [s for s in calib["spots"] if s.get("group") not in ids]
         for walk in calib["walks"]:
             calib["spots"].extend(walkcal.walk_spots(walk, walk["id"]))
-            App._learn_from_walk(calib, walk)
+        App._refit_motion(calib)
         calib["walkcal_v"] = walkcal.VERSION
 
     @staticmethod
-    def _learn_from_walk(calib: dict, walk: dict):
-        fit = walkcal.heading_fit(walk)
-        if fit and fit[1] > 0.5:
-            calib["heading"][walk["phone"]] = [round(fit[0], 4), round(fit[1], 3)]
-        stride = walkcal.stride_fit(walk)
-        if stride:
-            calib["stride"] = round(stride, 3)
+    def _refit_motion(calib: dict):
+        """Compass offsets and stride from every stored walk and mark leg, then each mark's facing from them (marks
+        made before the offset was known get it now). Files from before raw walks were kept have nothing to refit
+        from, so their values stay."""
+        if calib["walks"] or calib["legs"]:
+            calib["heading"], stride = walkcal.motion_fit(calib["walks"], calib["legs"])
+            if stride:
+                calib["stride"] = stride
+            else:
+                calib.pop("stride", None)
+        for spot in calib["spots"]:
+            offset = calib["heading"].get(spot.get("phone"))
+            if spot.get("kind") == "mark" and spot.get("compass") is not None:
+                spot["facing"] = None if offset is None else round(math.radians(spot["compass"]) + offset[0], 3)
 
     def _save_calib(self):
         write_json(DATA / "calibration" / f"{self.calib['name']}.json", self.calib)
@@ -271,6 +294,10 @@ class App:
         links = self.live.links_dict()
         self.map_links = links
         self.scan_objects = self._scan_objects()
+        try:   # decoys stand off the scanned furniture; same 0..w frame as _tick_decoys (layout bbox min corner)
+            self.decoy_room = Room.from_dict({"polygon": self.layout.get("polygon"), "objects": self.scan_objects})
+        except ValueError:
+            self.decoy_room = None
         self.blocked = planner.blocked(self.scan_objects) if self.settings["furniture"] else []
         has_boards = bool(self.layout.get("receivers"))
         self.map = (rmap.RadioMap(self.layout, self.calib["spots"], links, self.blocked, self.settings["holder_body"])
@@ -316,6 +343,19 @@ class App:
         require(rmap.point_in_poly(x, y, self.layout["polygon"]), "spot must be inside the room")
         duration = max(3.0, min(120.0, finite(body.get("duration", default_s))))
         self.live.start_capture(kind, phone, x, y, orientation(body), duration, time.time() + delay)
+
+    def start_mark(self, phone: str, body: dict):
+        """Mark "I'm here" at (x, y): a standing capture. The leg walked since this phone's previous mark is cut
+        from the motion log now, while the log still holds it."""
+        x, y = finite(body["x"]), finite(body["y"])
+        require(rmap.point_in_poly(x, y, self.layout["polygon"]), "tap inside the room")
+        now = time.time()
+        self.live.start_capture("mark", phone, x, y, orientation(body), MARK_S, now + MARK_DELAY_S)
+        prev = self.last_mark.get(phone)
+        if prev and now - prev[0] <= walkcal.LEG_MAX_S:
+            self.live.capture["leg"] = {"phone": phone, "t0": prev[0], "x0": prev[1], "y0": prev[2], "x1": x, "y1": y,
+                                        "motion": self.live.motion_between(phone, prev[0], now)}
+        self.mark_results.pop(phone, None)
 
     def start_empty(self, phone: str):
         """Empty-room recording for device-free sensing; starts after EMPTY_LEAVE_S so the person can leave."""
@@ -377,6 +417,8 @@ class App:
             self._finish_empty(cap)
         elif kind == "walk":
             self._finish_walk(cap)
+        elif kind == "mark":
+            self._finish_mark(cap)
         else:
             self._finish_spot(cap)
 
@@ -398,7 +440,7 @@ class App:
             self.calib["walks"].append(walkcal.raw_walk(cap, walk_id))
             self.calib["walkcal_v"] = walkcal.VERSION
         self.calib["df_walk"].extend(walkcal.df_walk(cap))
-        self._learn_from_walk(self.calib, cap)
+        self._refit_motion(self.calib)
         self._save_calib()
         if spots:
             self._rebuild()
@@ -435,9 +477,101 @@ class App:
         warn = " WARN " + "; ".join(cap["warnings"]) if cap["warnings"] else ""
         self._note(f"{message} at ({cap['x'] / FT:.1f}, {cap['y'] / FT:.1f}) ft, {frames} frames{warn}")
 
+    @staticmethod
+    def _still_samples(cap: dict):
+        """(samples outside the stretches the phone reported moving and not shadowed, seconds of standing left)."""
+        moving = []
+        rows = sorted(cap.get("motion") or [])
+        for prev, cur in zip([None] + rows, rows):
+            stepped = prev is not None and cur[1] is not None and prev[1] is not None and cur[1] > prev[1]
+            if cur[3] or stepped:
+                # A report describes about the last second.
+                moving.append((cur[0] - 1.0 - MARK_MOVE_PAD_S, cur[0] + MARK_MOVE_PAD_S))
+        kept = [s for s in cap["samples"] if not any(a <= s[0] <= b for a, b in moving)]
+        levels = {}
+        for s in kept:
+            levels.setdefault(s[1], []).append(s[3])
+        median = {b: sorted(v)[len(v) // 2] for b, v in levels.items()}
+        kept = [s for s in kept if s[3] >= median[s[1]] - MARK_SHADOW_DB]
+        step = 0.05
+        still_s = step * sum(1 for i in range(int(cap["duration"] / step))
+                             if not any(a <= i * step <= b for a, b in moving))
+        return kept, still_s
+
+    def _finish_mark(self, cap: dict):
+        """Score the current map where the person says they stand (an honest check: the spot isn't in it yet), then
+        add the spot, learn from the walk that led here and pin the live dot to it."""
+        phone, x, y, now = cap["phone"], cap["x"], cap["y"], time.time()
+        kept, still_s = self._still_samples(cap)
+        per = rmap.per_node(kept)
+        heard = [b for b, v in per.items() if v["n"] >= MARK_MIN_FRAMES]
+        why = None
+        if still_s < MARK_MIN_S:
+            why = "you moved during the mark: stand still until the phone buzzes"
+        elif len(heard) < 2:
+            why = f"only {len(heard)} board(s) heard this phone: keep this page open and the screen on"
+        if why:
+            self.last_mark.pop(phone, None)
+            self.mark_results[phone] = {"t": now, "ok": False, "x": x, "y": y, "why": why}
+            self._note(f"mark at ({x / FT:.1f}, {y / FT:.1f}) ft not saved: {why}")
+            return
+        block = f"mark{int(cap['t0'] * 1000)}"
+        errs = [round(e, 3) for e in rmap.window_errors(self.map, kept, x, y)] if self.map else []
+        err = sorted(errs)[len(errs) // 2] if errs else None
+        headings = [r[2] for r in cap.get("motion") or [] if r[2] is not None]
+        compass = None
+        if headings:
+            c = sum(math.cos(math.radians(h)) for h in headings)
+            s = sum(math.sin(math.radians(h)) for h in headings)
+            compass = round(math.degrees(math.atan2(s, c)) % 360, 1)
+        common = {"phone": phone, "x": x, "y": y, "orientation": cap["orientation"], "duration": round(still_s, 2),
+                  "per_node": per, "warnings": cap["warnings"], "t": cap["t0"], "block": block}
+        # "calibrated": the map already had spots, so errors_m measures calibration, not the bare path-loss model.
+        self.calib["tests"].append(dict(common, kind="mark", errors_m=errs, calibrated=bool(self.calib["spots"])))
+        # One group per phone and grip: its marks share one offset in the map fit (radiomap._fit).
+        # compass: the phone's mean heading (deg) during the mark; facing derives from it (_refit_motion).
+        self.calib["spots"].append(dict(common, kind="mark", samples=kept, compass=compass, facing=None,
+                                        group=f"mark:{phone}:{cap['orientation']}"))
+        self.calib["df_walk"].extend(walkcal.df_walk({"marks": [[0.0, x, y], [cap["duration"], x, y]],
+                                                      "links": cap.get("links"), "t0": cap["t0"]}))
+        leg = cap.get("leg")
+        if leg:
+            self.calib["legs"] = (self.calib["legs"] + [leg])[-LEGS_KEEP:]
+        self._refit_motion(self.calib)
+        self._save_calib()
+        self._rebuild()
+        self.last_mark[phone] = (now, x, y)
+        self.live.anchor(phone, x, y, now)
+        self._write_rec({"rt": round(now, 4), "anchor": {"m": phone, "x": x, "y": y}})
+        self.mark_results[phone] = {"t": now, "ok": True, "x": x, "y": y, "err_m": err, "block": block,
+                                    "calibrated": self.calib["tests"][-1]["calibrated"],
+                                    "learned": bool(leg) and walkcal.leg_fit(leg) is not None}
+        off = f", was {err / FT:.1f} ft off" if err is not None else ""
+        self._note(f"mark saved at ({x / FT:.1f}, {y / FT:.1f}) ft{off}")
+
+    def undo_mark(self, phone: str):
+        """Forget this phone's latest mark (a mistaken tap): its spot, its check and the leg that ended there."""
+        last = self.mark_results.get(phone)
+        if not last or not last.get("ok"):
+            return 409, "no mark to undo"
+        block = last["block"]
+        self.calib["spots"] = [s for s in self.calib["spots"] if s.get("block") != block]
+        self.calib["tests"] = [t for t in self.calib["tests"] if t.get("block") != block]
+        legs = self.calib["legs"]
+        if legs and legs[-1]["phone"] == phone and (legs[-1]["x1"], legs[-1]["y1"]) == (last["x"], last["y"]):
+            legs.pop()
+        self._refit_motion(self.calib)
+        self._save_calib()
+        self._rebuild()
+        self.last_mark.pop(phone, None)
+        self.mark_results[phone] = dict(last, ok=False, undone=True, why="undone")
+        self._note(f"mark at ({last['x'] / FT:.1f}, {last['y'] / FT:.1f}) ft undone")
+
     def clear_calib(self):
         # The empty-room baseline describes the room, not the walks, so it survives.
-        self.calib.update(spots=[], tests=[], df_walk=[], heading={}, walks=[])
+        self.last_mark.clear()
+        self.mark_results.clear()
+        self.calib.update(spots=[], tests=[], df_walk=[], heading={}, walks=[], legs=[])
         self.calib.pop("stride", None)
         self._save_calib()
         self._rebuild()
@@ -501,7 +635,7 @@ class App:
         header, lines = load_session(path)
         if not lines:
             raise ValueError("session has no packets")
-        self.replay = Replay(fname, header, lines, self.lock, self.ctx, self.boards, speed, start, self.crowd_macs)
+        self.replay = Replay(fname, header, lines, self.lock, self.ctx, self.boards, speed, start)
         self.replay.start()
 
     def stop_replay(self):
@@ -534,6 +668,9 @@ class App:
                     self.live.bad_packets += 1
                 continue
             with self.lock:
+                # A crowd button sending to the board port drives the decoys; it is not a board.
+                if isinstance(pkt, dict) and self.decoys.handle_packet(pkt):
+                    continue
                 self.known_nodes.add(src[0])
                 self.live.ingest(pkt, rt, src)
                 self.record(rt, src, pkt)
@@ -615,50 +752,68 @@ class App:
             elif delay > 0:
                 time.sleep(delay)
 
-    # ---- Nick: decoy crowd (display-only) --------------------------------------------------------------------
-    def _layout_bounds(self):
-        """Bounding box (x0, y0, x1, y1) of the room outline, in the same metre frame as the ESP32 markers."""
-        poly = (self.layout or {}).get("polygon") or []
-        pts = [p for p in poly if isinstance(p, (list, tuple)) and len(p) >= 2]
-        if len(pts) < 3:
-            return None
-        xs, ys = [float(p[0]) for p in pts], [float(p[1]) for p in pts]
-        return min(xs), min(ys), max(xs), max(ys)
-
     def _tracked_center(self):
-        """The live position of the real person the crowd should hide (layout frame), or None if nobody is tracked.
-        Prefers a tracked phone's estimate; falls back to the phone-free 'body' estimate."""
-        live = self.live
-        for ph in getattr(live, "phones", {}).values():
-            est = getattr(ph, "est", None)
-            if isinstance(est, dict) and est.get("x") is not None and est.get("kind") != "stale":
-                return float(est["x"]), float(est["y"])
-        body = getattr(live, "body", None)
-        if isinstance(body, dict) and body.get("x") is not None:
-            return float(body["x"]), float(body["y"])
-        return None
+        """Where the real person is (layout frame): a live phone's estimate, else the phone-free body, else None."""
+        for ph in self.live.phones.values():
+            if ph.est and ph.est["kind"] != Status.STALE.value:
+                return ph.est["x"], ph.est["y"]
+        body = self.live.body
+        return (body["x"], body["y"]) if body else None
 
     def _tick_decoys(self, now):
-        """Advance the decoys inside the real room footprint, gathered around the tracked person so they hide them.
-        Called under self.lock from tick_loop."""
-        b = self._layout_bounds()
-        if not b:
-            self.decoys.set(False)
-            self.decoys.tick(now, (1.0, 1.0))
-            return
-        x0, y0, x1, y1 = b
+        """Advance the decoys inside the room, gathered around the tracked person. Under self.lock (tick_loop)."""
+        x0, y0, x1, y1 = _bbox(self.layout["polygon"])
         self._decoy_origin = (x0, y0)
-        center = None
         c = self._tracked_center()
-        if c is not None:
-            center = (c[0] - x0, c[1] - y0)     # into the crowd's 0..w / 0..d frame
-        self.decoys.tick(now, (max(x1 - x0, 0.5), max(y1 - y0, 0.5)), center=center)
+        center = None if c is None else (c[0] - x0, c[1] - y0)   # the crowd works in a 0..w / 0..d frame
+        boards = {b: (p["x"] - x0, p["y"] - y0) for b, p in self.layout["receivers"].items()}
+        before = self.decoys.members()
+        self.decoys.tick(now, self.decoy_room or (max(x1 - x0, 0.5), max(y1 - y0, 0.5)), center=center,
+                         boards=boards)
+        after = self.decoys.members()
+        # Same event lines tracker.Tracker writes for real phones, so the event log looks the same.
+        for mac in after.keys() - before.keys():
+            self.live.events.append([now, f"device joined {fmt_mac(mac)} {after[mac]}"])
+            self.live.events.append([now, f"tracking {fmt_mac(mac)}"])
+        for mac in before.keys() - after.keys():
+            self.live.events.append([now, f"device left {fmt_mac(mac)}"])
 
     def _decoy_snapshot(self):
-        """Decoys in the layout metre frame (offset into the room), each flagged sim for the UI to label."""
+        """Decoys moved from the crowd's frame into the layout frame (app.js mergeDecoys shows them as phones)."""
         ox, oy = self._decoy_origin
-        return [{"mac": d["mac"], "x": round(d["x"] + ox, 2), "y": round(d["y"] + oy, 2), "sim": True}
+        return [dict(d, x=round(d["x"] + ox, 2), y=round(d["y"] + oy, 2),
+                     trail=[[p[0], round(p[1] + ox, 3), round(p[2] + oy, 3)] for p in d["trail"]])
                 for d in self.decoys.snapshot()]
+
+    def _jam(self, snap: dict) -> dict:
+        """While the crowd is on, push real people's displayed dots and trail (from when it came on) around with
+        crowd.jam_offset. Copies what it changes: the tracker's own est / trail, Phone.raw and accuracy never move."""
+        since = self.decoys.on_since
+        if since is None:
+            return snap
+        x0, y0, x1, y1 = _bbox(self.layout["polygon"])
+
+        def moved(mac, t, x, y):
+            dx, dy = jam_offset(mac, t)
+            return (round(min(max(x + dx, x0 + 0.15), x1 - 0.15), 3),
+                    round(min(max(y + dy, y0 + 0.15), y1 - 0.15), 3))
+
+        def trail(mac, points):
+            return [p if p[0] < since else [p[0], *moved(mac, p[0], p[1], p[2]), *p[3:]] for p in points]
+
+        phones = []
+        for ph in snap["phones"]:
+            est = ph.get("est")
+            if est and est.get("kind") != Status.STALE.value:
+                x, y = moved(ph["mac"], snap["now"], est["x"], est["y"])
+                ph = dict(ph, est=dict(est, x=x, y=y), trail=trail(ph["mac"], ph["trail"]))
+            phones.append(ph)
+        snap["phones"] = phones
+        body = snap.get("body")
+        if body:
+            x, y = moved("body", snap["now"], body["x"], body["y"])
+            snap["body"] = dict(body, x=x, y=y, trail=trail("body", body.get("trail", [])))
+        return snap
 
     def set_decoys(self, on):
         with self.lock:
@@ -671,7 +826,7 @@ class App:
             return self.decoys.state.value == "on"
 
     def decoy_udp_loop(self):
-        """The Uno Q white button (tools/unoq_button_adb.py) sends {"t":"crowd","on":0|1} here to flip the decoys."""
+        """The Uno Q white button (tools/unoq_button_adb.py) sends crowd packets here (crowd.Crowd.handle_packet)."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -701,16 +856,17 @@ class App:
                          "file": self.rec_path.name if self.rec_path and self.rec_file else None,
                          "packets": self.rec_count}
             extra = {"view": view, "layout": self.layout, "calib": self.calib_summary(), "recording": recording,
-                     "phone_cal": {"pin": self.pin, "port": self.phone_port, "https": self.phone_https},
-                     "settings": self.settings, "settings_info": cfg.INFO, "lab": self.lab,
+                     "phone_cal": {"pin": None, "port": self.phone_port, "https": self.phone_https},
+                     "settings": self.settings, "settings_info": cfg.INFO,
+                     "settings_defaults": cfg.DEFAULTS, "lab": self.lab,
                      "furniture_prior": bool(self.blocked), "ssid": self.net.get("ssid"), "wall": time.time()}
-            extra["decoys"] = self._decoy_snapshot()   # Nick: simulated decoys for the 3D view (empty when off)
+            extra["decoys"] = self._decoy_snapshot()
             replay = self.replay
             if replay:
                 extra["replay"] = replay.info()
                 if view == "replay":
                     return replay.tracker.snapshot(extra)
-            return self.live.snapshot(extra)
+            return self._jam(self.live.snapshot(extra))
 
     def snapshot_json(self, view: str) -> str:
         """Shared by all SSE clients so several open tabs cost one snapshot per tick."""
@@ -728,20 +884,32 @@ class App:
             return str(override).lower().replace(":", "")
         return next((m for m, s in self.live.stations.items() if s.get("ip") == ip), None)
 
-    def pin_error(self, ip: str, pin):
-        """None when the PIN is accepted, else the message to show. An empty PIN doesn't count as a guess."""
-        tries, locked_until = self.pin_fail.get(ip, (0, 0.0))
-        now = time.time()
-        if now < locked_until:
-            return f"too many wrong PINs, wait {locked_until - now:.0f} s"
-        if pin is not None and str(pin) == self.pin:
-            self.pin_fail.pop(ip, None)
-            return None
-        if not pin:
-            return "enter the PIN shown on the laptop (Calibrate tab)"
-        tries += 1
-        self.pin_fail[ip] = (0, now + PIN_LOCK_S) if tries >= PIN_TRIES else (tries, 0.0)
-        return "wrong PIN (see the dashboard, Calibrate tab)"
+    def mark_plan(self):
+        sig = json.dumps([self.layout["polygon"], self.scan_objects])
+        if self._plan_cache[0] != sig:
+            self._plan_cache = (sig, planner.mark_plan(self.layout["polygon"], self.scan_objects))
+        return self._plan_cache[1]
+
+    def _plan_state(self, near=None) -> dict:
+        """phone_state's "plan" ([[x, y, done]...] in walking order) and "next" ([x, y] or None)."""
+        plan = self.mark_plan()
+        standing = [s for s in self.calib["spots"] if s.get("still") is not False]
+        done = planner.plan_done(plan, [(s["x"], s["y"]) for s in standing])
+        marks = [s for s in standing if s.get("kind") == "mark"]
+        last = max(marks, key=lambda s: s.get("t", 0)) if marks else None
+        i = planner.plan_next(plan, done, (last["x"], last["y"]) if last else None, near)
+        return {"plan": [[x, y, d] for (x, y), d in zip(plan, done)], "next": None if i is None else plan[i]}
+
+    def _mark_rows(self):
+        """[[x, y, error m before the map learned that spot, or None]] for each marked spot."""
+        errs = {t["block"]: t.get("errors_m") for t in self.calib["tests"] if t.get("block") and t.get("calibrated")}
+        out = []
+        for s in self.calib["spots"]:
+            if s.get("kind") != "mark":
+                continue
+            e = errs.get(s.get("block"))
+            out.append([s["x"], s["y"], round(sorted(e)[len(e) // 2], 3) if e else None])
+        return out
 
     def phone_state(self, mac) -> dict:
         layout = self.layout
@@ -756,17 +924,27 @@ class App:
                          for t in self.calib.get("tests", [])[-20:]],
                "spots": [[s["x"], s["y"], s.get("kind", "calibrate")] for s in self.calib["spots"]],
                "me": None, "capture": None, "https": self.phone_https}
+        marks = self._mark_rows()
+        recent = [e for *_, e in marks[-8:] if e is not None]
+        out.update(marks=marks, typical_m=sorted(recent)[len(recent) // 2] if len(recent) >= 2 else None,
+                   stride=self.calib.get("stride"), result=None, compass=False)
         if not mac:
+            out.update(self._plan_state())
             return out
         ph = self.live.phones.get(mac)
         report = self.live.fresh_report(mac)
         now = time.time()
         out["me"] = {"mac": mac, "name": self.live.stations.get(mac, {}).get("nm", ""),
                      "est": ph.est if ph else None, "motion": report["mv"] if report else None}
+        est = ph.est if ph else None
+        out.update(self._plan_state((est["x"], est["y"]) if est else None))
+        out["result"] = self.mark_results.get(mac)
+        out["compass"] = mac in self.calib.get("heading", {})
         cap = self.live.capture
         if cap and cap["phone"] == mac:
             out["capture"] = {"kind": cap["kind"], "phase": capture_phase(cap, now),
                               "elapsed": round(now - cap["t0"], 1), "duration": cap["duration"],
+                              "x": cap["x"], "y": cap["y"],
                               "marks": len(cap["marks"]), "frames": sum(s[2] for s in cap["samples"])}
         return out
 
@@ -836,7 +1014,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(read_json(DATA / "scan" / "room.json", None))
         if path == "/api/state":
             return self._json(APP.snapshot(view))
-        if path == "/api/crowd":          # Nick: toggle the simulated decoys (web button / testing without hardware)
+        if path == "/api/crowd":   # toggles the decoys; ?on=1 / ?on=0 sets them
             on = self._query(url).get("on")
             state = APP.toggle_decoys() if on is None else APP.set_decoys(on in ("1", "true", "on"))
             return self._json({"on": state})
@@ -889,8 +1067,42 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return
 
+    def _scan_import(self, url):
+        """Raw .glb/.zip body (or none, to re-turn the stored scan); the heavy mesh work runs outside APP.lock."""
+        q = self._query(url)
+        # Not a CORS-safelisted type, so another web page can't post a file here without a preflight we never answer.
+        if self.headers.get("Content-Type") != "application/octet-stream":
+            return self._json({"error": "send the file as application/octet-stream"}, 415)
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length > SCAN_MAX_BYTES:
+            return self._json({"error": "scan file too large"}, 413)
+        old = read_json(DATA / "scan" / "room.json", {}) or {}
+        try:
+            if length > 0:
+                raw, source, rotate = self.rfile.read(length), Path(q.get("name", "scan.glb")).name[:80], 0
+            else:
+                raw, source = (DATA / "scan" / "scan.glb").read_bytes(), old.get("source", "scan.glb")
+                rotate = (int(old.get("rotate", 0)) + 1) % 4
+            room = import_scan.import_room(raw, source, rotate, DATA)
+        except FileNotFoundError:
+            return self._json({"error": "no room scan imported yet"}, 404)
+        except (ValueError, KeyError, IndexError, zipfile.BadZipFile) as exc:
+            return self._json({"error": f"couldn't read that scan: {exc}"}, 400)
+        with APP.lock:
+            layout = dict(APP.layout, polygon=room["polygon"])
+            # Calibration is kept per layout name, so a different scan gets a fresh set and an old room's comes back.
+            if source != old.get("source"):
+                layout["name"] = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(source).stem)[:60] or "room"
+            _post_layout(APP, {"layout": layout})
+        w, d = room["polygon"][2]
+        outside = [k for k, r in layout["receivers"].items() if not (0 <= r["x"] <= w and 0 <= r["y"] <= d)]
+        return self._json({"ok": True, "w": w, "d": d, "objects": len(room["objects"]), "outside": outside})
+
     def do_POST(self):
-        path = urlparse(self.path).path
+        url = urlparse(self.path)
+        path = url.path
+        if path == "/api/scan/import":
+            return self._scan_import(url)
         try:
             body = self._body()
         except ValueError:
@@ -995,8 +1207,8 @@ class QuietServer(ThreadingHTTPServer):
 class PhoneHandler(Handler):
     """Phone calibration page, served on all interfaces so phones on the demo Wi-Fi reach it.
 
-    Only the calibration flow is exposed: callers must be on the demo subnet, and anything that changes state needs
-    the dashboard PIN. The phone is identified by its IP in the AP's station list.
+    Only the calibration flow is exposed, and only to callers on the demo subnet (the WPA2 network is the gate; there
+    is no PIN). The phone is identified by its IP in the AP's station list.
     """
 
     def _allowed(self) -> bool:
@@ -1017,9 +1229,6 @@ class PhoneHandler(Handler):
             q = self._query(url)
             ip = self.client_address[0]
             with APP.lock:
-                err = APP.pin_error(ip, q.get("pin"))
-                if err:
-                    return self._json({"error": err}, 403)
                 return self._json(APP.phone_state(APP.phone_for_ip(ip, q.get("mac"))))
         return self._json({"error": "not found"}, 404)
 
@@ -1035,9 +1244,6 @@ class PhoneHandler(Handler):
         try:
             with APP.lock:
                 ip = self.client_address[0]
-                err = APP.pin_error(ip, body.get("pin"))
-                if err:
-                    return self._json({"error": err}, 403)
                 mac = APP.phone_for_ip(ip, body.get("mac"))
                 if not mac:
                     return self._json({"error": "this phone is not on the demo Wi-Fi "
@@ -1045,7 +1251,7 @@ class PhoneHandler(Handler):
                 if route is None:
                     return self._json({"error": "not found"}, 404)
                 cap = APP.live.capture
-                if path in ("/api/capture", "/api/walk/start", "/api/empty/start") and cap:
+                if path in ("/api/mark", "/api/capture", "/api/walk/start", "/api/empty/start") and cap:
                     return self._reply(BUSY)
                 mine = cap is not None and cap["phone"] == mac
                 return self._reply(route(APP, body, mac, mine))
@@ -1074,6 +1280,8 @@ def _phone_motion(a: App, b: dict, mac: str, mine: bool):
 
 # (app, body, phone mac, whether the running capture is this phone's) -> None (ok) or (status, error).
 PHONE_POST = {
+    "/api/mark": lambda a, b, mac, mine: a.start_mark(mac, b),
+    "/api/mark/undo": lambda a, b, mac, mine: BUSY if a.live.capture else a.undo_mark(mac),
     "/api/walk/start": lambda a, b, mac, mine: a.live.start_walk(mac, orientation(b), time.time()),
     "/api/capture": lambda a, b, mac, mine: a.start_spot(b, mac, 12, 3.0),
     "/api/walk/mark": _phone_mark,
@@ -1111,7 +1319,7 @@ def main():
     parser.add_argument("--port", type=int, default=int(net.get("dashboard_port", 8080)))
     parser.add_argument("--udp-port", type=int, default=int(net.get("server_udp_port", 5007)))
     parser.add_argument("--decoy-udp-port", type=int, default=int(net.get("decoy_udp_port", 5005)),
-                        help="Nick: UDP port the Uno Q white button toggles the simulated decoys on (0 = off)")
+                        help="UDP port the Uno Q white button toggles the simulated decoys on (0 = off)")
     parser.add_argument("--targets", default="", help="board addresses host:port,... (simulator)")
     parser.add_argument("--no-record", action="store_true")
     parser.add_argument("--phone-port", type=int, default=int(net.get("phone_port", 8081)),
@@ -1135,7 +1343,7 @@ def main():
         APP.set_recording(True)
     loops = [APP.udp_loop, APP.subscribe_loop, APP.tick_loop]
     if args.decoy_udp_port:
-        loops.append(APP.decoy_udp_loop)   # Nick: listen for the Uno Q white button
+        loops.append(APP.decoy_udp_loop)
     for loop in loops:
         threading.Thread(target=loop, daemon=True).start()
     rec = APP.rec_path.name if APP.rec_file else "off"

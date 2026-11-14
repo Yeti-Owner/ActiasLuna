@@ -22,8 +22,12 @@ firmware/luna_node/main/luna_secrets.h
 .env
 
 # Personal data: recordings, calibration, device MACs
-data/
-config/crowd.json
+data/*
+# ...except the imported room scan, so the 3D view and decoys work on a fresh clone (no MACs or recordings in it).
+!data/scan/
+data/scan/*
+!data/scan/room.json
+!data/scan/scan.glb
 
 # ESP-IDF build output
 firmware/**/build*/
@@ -54,3 +58,7 @@ venv/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Frontend (web/): deps and build output
+node_modules/
+web/static/

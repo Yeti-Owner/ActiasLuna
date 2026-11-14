@@ -70,6 +70,8 @@ OFF_SD_MIN = 5.0
 OFF_JUMP = 1.5
 OFF_LEARN_UNC_M = 1.0
 SMOOTH_LAG_S = 3.0
+# A tapped position is good to about a step either way (finger on a small map, where exactly the phone is held).
+PIN_SD_M = 0.25
 
 Window = Callable[[float, float], "rmap.Live"]
 
@@ -110,6 +112,20 @@ class Track:
     def reset(self):
         self.__init__()
 
+    def pin(self, m: "rmap.RadioMap", x: float, y: float, t: float, sd: float = PIN_SD_M):
+        """The holder said where they stand: restart the belief as a PIN_SD_M blob there. The learned phone offset
+        is kept; the dwell and the smoothing history restart, so the trail never smooths across the jump."""
+        grid = m.grid
+        if grid is None:
+            return
+        b = np.exp(-0.5 * ((grid.cx - x) ** 2 + (grid.cy - y) ** 2) / sd ** 2)
+        if b.sum() <= 0:
+            return
+        self.belief = b / b.sum()
+        self.t = self.meas_t = t
+        self.still_since = self.anchor = None
+        self._restart_history(t)
+
     def _restart_history(self, t: float):
         self.hist.clear()
         self.hist.append((t, self.belief, None, None))
@@ -127,10 +143,11 @@ class Track:
         middle = sorted(changes)[len(changes) // 2]
         return max(abs(c - middle) for c in changes) > STILL_BREAK_DB
 
-    def _walking_move(self, t: float, dt: float, mv: int, steps: int, facing, stride: float, pdr: bool) -> Move:
+    def _walking_move(self, t: float, dt: float, mv: int, steps: int, facing, stride: float, pdr: bool,
+                      creep: bool) -> Move:
         if steps > 0:
             self.last_step_t = t
-        creeping = mv == 1 and steps <= 0 and (self.last_step_t is None or t - self.last_step_t > NOSTEP_S)
+        creeping = creep and mv == 1 and steps <= 0 and (self.last_step_t is None or t - self.last_step_t > NOSTEP_S)
         if steps > 0:
             dist = min(PDR_MAX_STEPS, steps) * stride
         elif creeping:
@@ -143,12 +160,14 @@ class Track:
 
     def step(self, m: "rmap.RadioMap", t: float, window: Window, mv: int = -1, steps: int = 0,
              facing: Optional[float] = None, stride: float = 0.7, pdr: bool = True, shadow: bool = False,
-             strength: float = 1.0, extra=None, holder_facing: Optional[float] = None) -> Optional[dict]:
+             strength: float = 1.0, extra=None, holder_facing: Optional[float] = None,
+             creep: bool = True) -> Optional[dict]:
         """Advance one tick and return radiomap's summary of the filtered belief (None before the first fix).
 
         window(t0, t1): this phone's readings in (t0, t1]. mv: 0 still, 1 moving, -1 unknown. steps: new steps since
         the last tick. facing: map angle walked towards, or None; pdr=False ignores steps. extra: another per-cell
-        log-likelihood on the same grid (sensing.DFMap). strength scales this update's weight.
+        log-likelihood on the same grid (sensing.DFMap). strength scales this update's weight. creep=False: "moving" without
+        steps holds position instead of creeping along the facing.
         """
         grid = m.grid
         if grid is None:
@@ -176,7 +195,7 @@ class Track:
             live = window(max(self.still_since, t - STILL_WIN_S), t)
         else:
             self.still_since = self.anchor = None
-            move = self._walking_move(t, dt, mv, steps, facing, stride, pdr)
+            move = self._walking_move(t, dt, mv, steps, facing, stride, pdr, creep)
             recent = self.meas_t is not None and t - self.meas_t <= WINDOW_MAX_S
             t0 = self.meas_t if recent else t - WINDOW_MAX_S
             due = self.belief is None or t - t0 >= MEAS_S - 1e-6
@@ -233,23 +252,24 @@ class Track:
         self.off += gain * (solved - self.off)
         self.off_sd = max(OFF_SD_MIN, self.off_sd * math.exp(-dt / OFF_TAU_S))
 
-    def smoothed(self, m: "rmap.RadioMap") -> list:
+    def smoothed(self, m: "rmap.RadioMap", after: float = -math.inf, step: float = 0.0) -> list:
         """Backward pass over the last SMOOTH_LAG_S: [(t, x, y, unc)] oldest first, each also using later readings.
 
-        The oldest entry is final; newer ones keep improving on later calls. Display / trail only.
+        Only points at least `step` s after `after` and after each other are summarised (the backward pass itself
+        still runs over every entry). The oldest entry is final; newer ones keep improving on later calls. Display /
+        trail only.
         """
         grid = m.grid
         hist = list(self.hist)
         if grid is None or not hist or len(hist[-1][1]) != len(m.cells):
             return []
         beta = np.ones(len(m.cells))
-        out = []
+        gammas = []
         for t, alpha, move, factor in reversed(hist):
             gamma = alpha * beta
             total = gamma.sum()
             if total > 0:
-                est = m.summary(gamma / total)
-                out.append((t, est["x"], est["y"], est["unc"]))
+                gammas.append((t, gamma, total))
             if move is None:
                 break
             beta = _backward(grid, factor * beta, move)
@@ -257,5 +277,12 @@ class Track:
             if peak <= 0:
                 break
             beta = beta / peak
-        out.reverse()
+        out = []
+        last = after
+        for t, gamma, total in reversed(gammas):
+            if t - last < step:
+                continue
+            last = t
+            est = m.summary(gamma / total)
+            out.append((t, est["x"], est["y"], est["unc"]))
         return out
