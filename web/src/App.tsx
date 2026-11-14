@@ -24,11 +24,9 @@ export default function App() {
 
       {/* Flying white Luna moth starting under the logo */}
       <ScrollMoth
-        src="/static/moth-luna/"
-        sprite="luna"
-        width={120}
-        flapSpeed={0.4}
-        flapDepth={0.5}
+        width={78}
+        flapSpeed={0.75}
+        flapDepth={0.48}
       />
 
       {/* Sticky header after hero */}

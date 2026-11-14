@@ -1,3 +1,4 @@
+import GardenInsect from "@/components/ui/garden-insect"
 const PRIVACY_ITEMS = [
   {
     title: "Content is never read",
@@ -39,6 +40,7 @@ const PRIVACY_ITEMS = [
 export default function SecurityPrivacySection() {
   return (
     <section className="relative w-full max-w-5xl mx-auto px-6 md:px-16 py-16">
+      <GardenInsect species="moth" className="insect-privacy" />
       <div className="mb-10 text-left">
         <span data-moth-avoid className="font-serif text-xs uppercase tracking-widest text-white/60 mb-2 inline-block">
           Trust & Safety
