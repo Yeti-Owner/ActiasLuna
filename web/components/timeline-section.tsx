@@ -14,7 +14,7 @@ const MOTH_MILESTONES: Milestone[] = [
     date: "STEP 02",
     title: "Map",
     description:
-      "A short calibration walk teaches Moth how signal strength changes across your room: walls, furniture and all.",
+      "A short calibration walk teaches Actias Luna how signal strength changes across your room: walls, furniture and all.",
   },
   {
     id: "3",
@@ -59,11 +59,11 @@ export default function TimelineSection() {
       </div>
 
       <div className="px-6 md:px-16 mb-8 text-left">
-        <span data-moth-avoid className="font-mono text-xs uppercase tracking-widest text-white/60 mb-2 inline-block">
+        <span data-moth-avoid className="font-serif text-xs uppercase tracking-widest text-white/60 mb-2 inline-block">
           Architecture
         </span>
         <h2 data-moth-avoid className="text-3xl md:text-4xl font-bold tracking-tight text-white">
-          How Moth works
+          How Actias Luna works
         </h2>
       </div>
       <ScrollTimeline milestones={MOTH_MILESTONES} />

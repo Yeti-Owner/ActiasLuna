@@ -10,8 +10,8 @@
   --color-on-forest-muted: rgba(255, 255, 255, 0.78);
   --color-on-forest-faint: rgba(255, 255, 255, 0.20);
 
-  --font-sans: var(--font-geist-sans), 'Geist Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-geist-mono), 'Geist Mono', ui-monospace, monospace;
+  --font-sans: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
+  --font-mono: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
   --font-pixel: var(--font-geist-pixel), 'Geist Pixel', monospace;
   --font-serif: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
 }
@@ -31,14 +31,14 @@ html, body {
   color: #FFFFFF;
   margin: 0;
   padding: 0;
-  font-family: var(--font-geist-sans), 'Geist Sans', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
 }
 
 code, kbd, samp, pre, .font-mono {
-  font-family: var(--font-geist-mono), 'Geist Mono', ui-monospace, monospace;
+  font-family: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
 }
 
 ::selection {

@@ -1,8 +1,4 @@
-import { GeistSans } from 'geist/font/sans'
-import { GeistMono } from 'geist/font/mono'
-import { GeistPixel } from 'geist/font/pixel/variable'
-import { GeistPixelSquare, GeistPixelGrid, GeistPixelCircle, GeistPixelTriangle, GeistPixelLine } from 'geist/font/pixel'
-import { GeistSerif, GeistSerifRegular, GeistSerifSquare, GeistSerifTriangle, GeistSerifHeart } from 'geist/font/serif'
+import { GeistSerif } from "geist/font/serif"
 
 import Hero from "@/components/hero"
 import Nav from "@/components/nav"
@@ -16,9 +12,9 @@ import Footer from "@/components/footer"
 export default function App() {
   return (
     <div
-      className={`min-h-screen bg-[#2E6F40] text-white flex flex-col selection:bg-[#8FD3A5] selection:text-[#12301D] ${GeistSans.className}`}
+      className={`min-h-screen bg-[#2E6F40] text-white flex flex-col selection:bg-[#8FD3A5] selection:text-[#12301D] ${GeistSerif.className}`}
       style={{
-        fontFamily: "var(--font-geist-sans), 'Geist Sans', system-ui, sans-serif",
+        fontFamily: "var(--font-geist-serif), 'Geist Serif', Georgia, serif",
       }}
     >
       {/* 1. Logo Hero (Top of site, full screen, 100svh) */}
