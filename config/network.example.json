@@ -1,0 +1,10 @@
+{
+  "ssid": "DEMO-DONT JOIN",
+  "password": "change-me-please",
+  "channel": 6,
+  "max_stations": 15,
+  "ap_ip": "192.168.4.1",
+  "node_port": 5006,
+  "server_udp_port": 5007,
+  "dashboard_port": 8080
+}

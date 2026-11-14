@@ -16,14 +16,19 @@ mesh/
 # Secrets (regenerate with tools/gen_secrets.py)
 config/network.json
 config/certs/
-firmware/moth_node/main/moth_secrets.h
+firmware/luna_node/main/luna_secrets.h
 *.pem
 *.key
 .env
 
 # Personal data: recordings, calibration, device MACs
-data/
+data/*
 config/crowd.json
+# ...except the imported room scan, so the 3D view and decoys work on a fresh clone (no MACs or recordings in it).
+!data/scan/
+data/scan/*
+!data/scan/room.json
+!data/scan/scan.glb
 
 # ESP-IDF build output
 firmware/**/build*/
@@ -35,6 +40,7 @@ firmware/**/dependencies.lock
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 venv/
 .pytest_cache/
@@ -53,3 +59,7 @@ venv/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Frontend (web/): deps and build output
+node_modules/
+web/static/
