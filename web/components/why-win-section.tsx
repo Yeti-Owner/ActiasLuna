@@ -2,20 +2,20 @@ import GardenInsect from "@/components/ui/garden-insect"
 
 const reasons = [
   {
-    title: "Working from chip to screen.",
-    description: "ESP32 receivers, signal filtering, and a live 3D room come together in one working system.",
+    title: "Security that costs less.",
+    description: "A safer home shouldn’t mean a shopping list. We’re building around the Wi-Fi devices you already own.",
   },
   {
-    title: "A fresh use for familiar signals.",
-    description: "We explore how changes in Wi-Fi can reveal presence, opening another path to indoor awareness.",
+    title: "Less for hackers to steal.",
+    description: "Your living room doesn’t need to be on camera. No video recordings means no private footage to leak.",
   },
   {
-    title: "Privacy made tangible.",
-    description: "We make invisible tracking risks visible and clearly label simulated decoys so the demonstration stays honest.",
+    title: "Just make a call.",
+    description: "“Is anyone in my living room?” Our Chert call flow puts the answer in a conversation, not another dashboard.",
   },
   {
-    title: "Built for real people.",
-    description: "An approachable interface turns complex radio data into a room people can explore and understand.",
+    title: "Beyond camera blind spots.",
+    description: "A camera only sees where it points. Wi-Fi sensing can detect presence beyond that line of sight.",
   },
 ]
 
