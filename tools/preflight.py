@@ -140,7 +140,7 @@ def check_live(cloud, dashboard):
     try:
         _, st, _ = http(dashboard.rstrip("/") + "/api/state", timeout=5)
     except (urllib.error.URLError, OSError):
-        report("FAIL", f"Moth server not running at {dashboard}", "Start it: double-click START_MOTH.cmd.")
+        report("FAIL", f"Moth server not running at {dashboard}", "Start it: double-click START_BACKEND.cmd.")
         return
     online = [n["label"] for n in st.get("nodes", []) if n.get("status") == "online"]
     report("OK" if len(online) >= 3 else ("WARN" if online else "FAIL"),
@@ -152,7 +152,7 @@ def check_live(cloud, dashboard):
            "" if people or body else "Nobody tracked yet: join a phone to the demo Wi-Fi or walk in the room.")
     c = st.get("cloud") or {}
     if c.get("state") == "off" or not c:
-        report("FAIL", "Moth server is not uploading (cloud off)", "Check config/cloud.json, restart START_MOTH.cmd.")
+        report("FAIL", "Moth server is not uploading (cloud off)", "Check config/cloud.json, restart START_BACKEND.cmd.")
         return
     run = c.get("run")
     status = "OK" if c.get("state") == "ok" else "FAIL"

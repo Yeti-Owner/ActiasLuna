@@ -63,7 +63,8 @@ the rest of `data/` (layout, calibration, recordings) stays on each laptop.
 
 1. Power the boards. The AP board creates the demo network (`WATCHING-YOU`, from `config/network.json`).
 2. Join the laptop to that network.
-3. Start the server (it records every session to `data/sessions/`):
+3. Start the server: double-click `START_BACKEND.cmd` (opens the dashboard, uploads to Vultr when `config/cloud.json`
+   is filled in), or run it yourself. It records every session to `data/sessions/`:
 
    ```bash
    python server/luna_server.py
@@ -83,6 +84,14 @@ cd web && npm run dev               # web frontend at http://localhost:5173/stat
 
 No boards? `python tools/sim_nodes.py --real` simulates your boards at their saved spots; then start the server with
 `--targets 127.0.0.1:6101,127.0.0.1:6102,127.0.0.1:6103 --no-record`.
+
+### Second laptop: website with the live room from Vultr
+
+The laptop above (boards, Wi-Fi, Ethernet) uploads to Vultr. A second laptop needs only internet and a copy of
+`config/cloud.json` (`url` and `query_token`). Double-click `FRONTEND.cmd`: it builds the website, serves it at
+http://127.0.0.1:8090/ and opens it. The 3D room in the timeline shows whoever Vultr last saw; if Vultr has had no
+upload for 5 minutes it shows nobody. `FRONTEND.cmd` passes `--last-known` for now, which keeps drawing the last known
+positions (greyed, "not heard") so you can check it works without the backend running.
 
 ## Decoy crowd and the Uno Q button
 

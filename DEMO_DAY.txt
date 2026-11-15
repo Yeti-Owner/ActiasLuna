@@ -13,10 +13,12 @@ All three files below are in the repo folder. Double-click them.
    - Wi-Fi: join WATCHING-YOU. Windows will say "No internet". That's expected; Ethernet carries the internet.
    - Turn OFF any VPN (TunnelBear etc.); it would pull Vultr traffic off the Ethernet.
 
-2. START THE SERVER        START_MOTH.cmd        (leave this window open the whole time)
+2. START THE SERVER        START_BACKEND.cmd     (leave this window open the whole time)
    It prints   cloud: this is run-YYYYMMDD-HHMMSS   and   cloud: uploading to https://149-28-97-171.sslip.io
    Each start is a new run. Chert only ever hears about the newest run, so earlier tests never leak in.
-   Dashboard: http://127.0.0.1:8080/
+   The dashboard (room scan, boards, calibration) opens by itself: http://127.0.0.1:8080/
+   Phone page (controls, I'm here, walks): the address the dashboard shows under Setup -> Calibrate.
+   Second laptop (website + live 3D room from Vultr): copy config\cloud.json to it, double-click FRONTEND.cmd.
 
 3. RUN IT A BIT
    Join a phone to WATCHING-YOU (or just walk in, for body tracking). Then do this walk, so there's a story to ask about:
@@ -52,7 +54,7 @@ IF SOMETHING FAILS
           Set-NetIPInterface -InterfaceAlias 'Wi-Fi' -InterfaceMetric 100
    "Laptop is not on the demo Wi-Fi"           Wi-Fi isn't on WATCHING-YOU, or the boards are off.
    "Boards online: none"                       Boards off or still booting; wait 10 s. Firewall must allow python.exe.
-   "Moth server not running"                   START_MOTH.cmd isn't open.
+   "Moth server not running"                   START_BACKEND.cmd isn't open.
    "Moth server uploading ...: cloud unreachable"   Same as the first item: no internet on Ethernet.
    "Laptop clock is N s off"                   Chert refuses calls if the clock is fast; see chert\README.md.
    Agent window closes straight away            Run:  powershell -ExecutionPolicy Bypass -File chert\run.ps1 agent

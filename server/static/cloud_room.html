@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Actias Room</title>
+<!-- Served by server/room_viewer.py at /room/ (frontend laptop), so every path here is under /room/. -->
+<script type="importmap">{"imports":{"three":"/room/lib/three/three.module.js","three/addons/":"/room/lib/three/addons/"}}</script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #09170f; color: #e7eaf6;
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #view3d { position: absolute; inset: 0; }
+  #view3d canvas { display: block; width: 100%; height: 100%; }
+  #badge { position: absolute; left: 12px; top: 12px; padding: 5px 10px; border-radius: 999px;
+    background: rgba(9, 23, 15, 0.78); border: 1px solid rgba(255, 255, 255, 0.15); pointer-events: none; }
+  #badge i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: #7a819c; }
+  #badge.live i { background: #8fdcb2; box-shadow: 0 0 8px #8fdcb2; }
+  #badge.stale i { background: #e6b24c; }
+  #badge.offline i { background: #ee6a73; }
+  #msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+    padding: 24px; color: rgba(255, 255, 255, 0.6); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="view3d"></div>
+<div id="badge"><i></i><span id="badgeText">Connecting to the cloud…</span></div>
+<div id="msg" class="hidden"></div>
+<script type="module" src="/room/view3d.js"></script>
+<script type="module" src="/room/cloud_room.js"></script>
+</body>
+</html>
