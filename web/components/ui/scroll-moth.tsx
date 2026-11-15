@@ -40,6 +40,7 @@ export default function ScrollMoth({ width = 78, flapSpeed = .75, flapDepth = .4
     let pageEnd = document.documentElement.scrollHeight - viewportHeight
     let size = width
     let disposed = false
+    let zoneTop = 0, zoneBottom = 0, hasZone = false
 
     const measure = () => {
       const sy = window.scrollY
@@ -51,6 +52,9 @@ export default function ScrollMoth({ width = 78, flapSpeed = .75, flapDepth = .4
       root.style.height = `${size * 1.12}px`
       const hero = document.querySelector("[data-moth-ignore]")
       heroEnd = hero ? hero.getBoundingClientRect().bottom + sy : viewportHeight
+      const zone = document.querySelector('[data-moth-flight-zone="right"]')?.getBoundingClientRect()
+      hasZone = !!zone
+      if (zone) { zoneTop = zone.top + sy; zoneBottom = zone.bottom + sy }
       const range = document.createRange()
       const next: Block[] = []
       document.querySelectorAll("h1,h2,h3,p,li,button,a,input,select,textarea,img,[data-moth-avoid],.garden-insect").forEach(el => {
@@ -70,6 +74,9 @@ export default function ScrollMoth({ width = 78, flapSpeed = .75, flapDepth = .4
     measure()
     const interval = window.setInterval(measure, 750)
     window.addEventListener("resize", measure)
+    // Loading the room changes the timeline's height; re-measure then rather than reading layout every frame.
+    const pageResize = new ResizeObserver(measure)
+    pageResize.observe(document.body)
 
     let x = viewportWidth - size
     let y = viewportHeight * .3
@@ -106,9 +113,7 @@ export default function ScrollMoth({ width = 78, flapSpeed = .75, flapDepth = .4
       previousScroll = sy
       scrollEnergy += (clamp(scrollVelocity / 1100, 0, 1) - scrollEnergy) * (1 - Math.exp(-dt * 3))
       const desiredY = viewportHeight * (.28 + progress * .36) + Math.sin(clock * .85) * 11
-      // Read the current zone bounds: loading the room can change the timeline's height.
-      const zone = document.querySelector('[data-moth-flight-zone="right"]')?.getBoundingClientRect()
-      const keepRight = !!zone && zone.top < viewportHeight && zone.bottom > 0
+      const keepRight = hasZone && zoneTop - sy < viewportHeight && zoneBottom - sy > 0
       const minFlightX = keepRight ? viewportWidth * .65 : 9
       const minCenter = minFlightX + size / 2
       if (keepRight && x < minCenter) {
@@ -192,6 +197,7 @@ export default function ScrollMoth({ width = 78, flapSpeed = .75, flapDepth = .4
       disposed = true
       cancelAnimationFrame(raf)
       clearInterval(interval)
+      pageResize.disconnect()
       window.removeEventListener("resize", measure)
       document.removeEventListener("visibilitychange", resume)
       motion.removeEventListener("change", resume)

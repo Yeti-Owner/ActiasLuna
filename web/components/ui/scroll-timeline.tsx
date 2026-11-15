@@ -79,12 +79,18 @@ export default function Component({ milestones }: TimelineProps) {
         last = performance.now(); raf = requestAnimationFrame(frame);
       }
     };
-    const update = () => {
+    // Layout is read only on resize; a scroll just shifts the cached track top.
+    let trackTop = 0;
+    const measure = () => {
       const rect = track.getBoundingClientRect();
       height = rect.height;
+      trackTop = rect.top + window.scrollY;
       waypoints = Array.from(track.querySelectorAll<HTMLElement>("[data-timeline-waypoint]")).map(el =>
         (el.getBoundingClientRect().top - rect.top) / Math.max(1, height));
-      target = Math.max(0, Math.min(1, (window.innerHeight * .5 - rect.top) / Math.max(1, height)));
+    };
+    const relayout = () => { measure(); update(); };
+    const update = () => {
+      target = Math.max(0, Math.min(1, (window.innerHeight * .5 - (trackTop - window.scrollY)) / Math.max(1, height)));
       const dy = window.scrollY - lastScroll;
       lastScroll = window.scrollY;
       // Small touchpad reversals should not make the moth spin around.
@@ -97,23 +103,24 @@ export default function Component({ milestones }: TimelineProps) {
     const resume = () => {
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
-      if (!document.hidden) update();
+      if (!document.hidden) relayout();
     };
-    const resize = new ResizeObserver(update);
+    const resize = new ResizeObserver(relayout);
     resize.observe(track);
+    resize.observe(document.body);
     window.addEventListener("scroll", update, { passive: true });
-    window.addEventListener("resize", update);
+    window.addEventListener("resize", relayout);
     document.addEventListener("visibilitychange", resume);
     motion.addEventListener("change", update);
-    update();
+    relayout();
     position = target; paint();
-    document.fonts.ready.then(() => { if (!disposed) update(); });
+    document.fonts.ready.then(() => { if (!disposed) relayout(); });
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
       resize.disconnect();
       window.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
+      window.removeEventListener("resize", relayout);
       document.removeEventListener("visibilitychange", resume);
       motion.removeEventListener("change", update);
     };

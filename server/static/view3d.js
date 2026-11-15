@@ -12,6 +12,13 @@ const BG = 0x090b16;
 const GREY = 0x7a819c;
 const FURNITURE = { Bed: 0x7d6bb0, Desk: 0x8c6c4a, Table: 0x8c6c4a, Chair: 0x50698a, Bookshelf: 0x7c5c3a, Dresser: 0x6c5242, Cabinet: 0x6c5242, Sofa: 0x5c6c94, TV: 0x3a3f52 };
 const STATUS = { online: 0x8fdcb2, stale: 0xe6b24c, offline: 0xee6a73 };
+const GREY_C = new THREE.Color(GREY);
+// Render cadence: full rate while the camera or a person moves, IDLE_MS between frames for the slow pulses alone.
+const IDLE_MS = 33;
+// A person must move this far (m) before the shadow map is redrawn; the room itself casts static shadows.
+const SHADOW_MOVE_M = 0.005;
+// Smoothed rAF interval (ms) above which quality steps down (pixel ratio, then shadow resolution), held SLOW_S s.
+const SLOW_MS = 26, SLOW_S = 2;
 
 function labelSprite(text, { size = 0.16, color = "#e7eaf6", bg = "rgba(12,15,28,0.78)" } = {}) {
   const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), px = 48;
@@ -38,11 +45,14 @@ const vline = (y0, y1, mat) => new THREE.Line(new THREE.BufferGeometry().setFrom
 class RoomView {
   constructor(el) {
     this.el = el;
-    const r = (this.renderer = new THREE.WebGLRenderer({ antialias: true }));
-    r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    const r = (this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" }));
+    this.pixelRatio = Math.min(1.5, window.devicePixelRatio || 1);
+    r.setPixelRatio(this.pixelRatio);
     r.localClippingEnabled = true;
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFShadowMap;
+    r.shadowMap.autoUpdate = false;
+    r.shadowMap.needsUpdate = true;
     el.appendChild(r.domElement);
 
     this.scene = new THREE.Scene();
@@ -68,8 +78,17 @@ class RoomView {
     this.boards = new Map();
     this.roomSig = "";
     this.visible = false;
+    this.onScreen = true;
     this.start = performance.now();
-    new ResizeObserver(() => this.resize()).observe(el);
+    this.lastTick = 0;
+    this.lastRender = 0;
+    this.frameMs = 16.7;
+    this.slowFor = 0;
+    this.dirty = true;
+    this.controls.addEventListener("change", () => { this.dirty = true; });
+    new ResizeObserver(() => { this.resize(); this.dirty = true; }).observe(el);
+    // The implicit root is the top-level viewport, so this also pauses an iframed view scrolled off the page.
+    new IntersectionObserver(([e]) => { this.onScreen = !e || e.isIntersecting; }).observe(el);
     this.resize();
     r.setAnimationLoop(() => this.frame());
   }
@@ -81,7 +100,7 @@ class RoomView {
     this.camera.updateProjectionMatrix();
   }
 
-  setVisible(on) { this.visible = on; if (on) this.resize(); }
+  setVisible(on) { this.visible = on; if (on) { this.resize(); this.dirty = true; } }
 
   async setRoom(layout, scan) {
     const sig = JSON.stringify([layout.polygon, scan && scan.source, scan && scan.transform]);
@@ -110,10 +129,11 @@ class RoomView {
     this.roomG.add(new THREE.LineSegments(gridGeo, new THREE.LineBasicMaterial({ color: 0x252d4a, transparent: true, opacity: 0.7 })));
 
     if (scan && scan.transform) {
-      try { await this.loadScan(scan, b); return; }
+      try { await this.loadScan(scan, b); this.renderer.shadowMap.needsUpdate = true; return; }
       catch (e) { console.warn("room scan failed to load, drawing the outline instead", e); this.roomG.clear(); }
     }
     this.outlineRoom(layout.polygon);
+    this.renderer.shadowMap.needsUpdate = true;
   }
 
   outlineRoom(poly) {
@@ -153,25 +173,44 @@ class RoomView {
     const room = new THREE.Box3(new THREE.Vector3(b.x0 - 0.3, -1, b.y0 - 0.3), new THREE.Vector3(b.x1 + 0.3, 4, b.y1 + 0.3));
     const meshes = [];
     root.traverse((o) => { if (o.isMesh) meshes.push(o); });
+    // Identical looks share one material and each edge style is one merged world-space line object, which keeps
+    // draw calls and shader switches down on integrated GPUs. RoomPlan exports have no normals, so shade flat.
+    const mats = new Map(), edges = { wall: [], other: [] };
+    const shared = (key, make) => {
+      let m = mats.get(key);
+      if (!m) { m = make(); m.clippingPlanes = clip; m.flatShading = true; mats.set(key, m); }
+      return m;
+    };
     for (const mesh of meshes) {
       const name = mesh.name || mesh.parent?.name || "";
       box.setFromObject(mesh);
       const wall = /^(Wall|Joint)_/.test(name), opening = /^(Door|Window|Opening)_/.test(name), isWindow = /^Window/.test(name);
       if (!(keep.has(name) || (wall && box.intersectsBox(room))) || /^Ceiling/.test(name)) { mesh.visible = false; continue; }
       let mat;
-      if (/^Floor_/.test(name)) mat = new THREE.MeshStandardMaterial({ color: 0x1a2038, roughness: 0.95 });
-      else if (wall) mat = new THREE.MeshStandardMaterial({ color: 0xa3aed4, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide });
-      else if (opening) mat = new THREE.MeshStandardMaterial({ color: isWindow ? 0x62d2e0 : 0xe6b24c, emissive: isWindow ? 0x0d3a40 : 0x3a2a0d, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
+      if (/^Floor_/.test(name)) mat = shared("floor", () => new THREE.MeshStandardMaterial({ color: 0x1a2038, roughness: 0.95 }));
+      else if (wall) mat = shared("wall", () => new THREE.MeshStandardMaterial({ color: 0xa3aed4, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }));
+      else if (opening) mat = shared(isWindow ? "window" : "door", () => new THREE.MeshStandardMaterial({ color: isWindow ? 0x62d2e0 : 0xe6b24c, emissive: isWindow ? 0x0d3a40 : 0x3a2a0d, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide }));
       else {
-        mat = new THREE.MeshStandardMaterial({ color: FURNITURE[byName[name]?.label] ?? 0x6c7896, roughness: 0.7, metalness: 0.05 });
+        const color = FURNITURE[byName[name]?.label] ?? 0x6c7896;
+        mat = shared("f" + color, () => new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.05 }));
         mesh.castShadow = true;
       }
-      mat.clippingPlanes = clip;
-      // RoomPlan exports have no normals, so shade flat.
-      mat.flatShading = true;
       mesh.material = mat;
       mesh.receiveShadow = true;
-      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 25),
+      const eg = new THREE.EdgesGeometry(mesh.geometry, 25);
+      eg.applyMatrix4(mesh.matrixWorld);
+      edges[wall ? "wall" : "other"].push(eg.attributes.position.array);
+      eg.dispose();
+    }
+    for (const [kind, parts] of Object.entries(edges)) {
+      if (!parts.length) continue;
+      const all = new Float32Array(parts.reduce((n, a) => n + a.length, 0));
+      let at = 0;
+      for (const a of parts) { all.set(a, at); at += a.length; }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(all, 3));
+      const wall = kind === "wall";
+      this.roomG.add(new THREE.LineSegments(geo,
         new THREE.LineBasicMaterial({ color: wall ? 0xa3aed4 : 0xdde2f2, transparent: true, opacity: wall ? 0.35 : 0.25, clippingPlanes: clip })));
     }
     for (const o of scan.objects || []) {
@@ -232,6 +271,7 @@ class RoomView {
   }
 
   update(S, colorFor, nameOf) {
+    this.dirty = true;
     const boardsSeen = new Set();
     for (const [id, p] of Object.entries(S.layout.receivers || {})) {
       boardsSeen.add(id);
@@ -245,11 +285,11 @@ class RoomView {
         b.add(tag);
         Object.assign(b.userData, { tag, text });
       }
-      b.position.set(p.x, 0, p.y);
+      if (b.position.x !== p.x || b.position.z !== p.y) { b.position.set(p.x, 0, p.y); this.renderer.shadowMap.needsUpdate = true; }
       b.userData.body.material.emissive.setHex(color);
       b.userData.halo.material.color.setHex(color);
     }
-    for (const [id, b] of this.boards) if (!boardsSeen.has(id)) { this.boardsG.remove(b); this.boards.delete(id); }
+    for (const [id, b] of this.boards) if (!boardsSeen.has(id)) { this.boardsG.remove(b); this.boards.delete(id); this.renderer.shadowMap.needsUpdate = true; }
 
     const peopleSeen = new Set();
     for (const p of S.phones) {
@@ -259,7 +299,7 @@ class RoomView {
       const color = new THREE.Color(colorFor(p.mac));
       let g = this.people.get(p.mac);
       if (!g) { g = this.makePerson(color, e); this.peopleG.add(g, g.userData.trail); this.people.set(p.mac, g); }
-      const u = g.userData, stale = e.kind === "stale", shade = stale ? new THREE.Color(GREY) : color;
+      const u = g.userData, stale = e.kind === "stale", shade = stale ? GREY_C : color;
       u.target = new THREE.Vector3(e.x, 0, e.y);
       u.targetUnc = e.unc;
       u.stale = stale;
@@ -275,32 +315,80 @@ class RoomView {
         g.add(u.tag);
         u.text = text;
       }
-      const pos = [], cols = [], n = p.trail.length;
-      p.trail.forEach((q, i) => {
-        pos.push(q[1], 0.02, q[2]);
-        const fade = 0.15 + 0.85 * (i / Math.max(1, n - 1)), c = q[4] === "estimated" ? color : new THREE.Color(GREY);
-        cols.push(c.r * fade, c.g * fade, c.b * fade);
-      });
-      u.trail.geometry.dispose();
-      u.trail.geometry = new THREE.BufferGeometry();
-      if (pos.length >= 6) {
-        u.trail.geometry.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-        u.trail.geometry.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
-      }
+      this.setTrail(u, p.trail, color);
     }
-    for (const [mac, g] of this.people) if (!peopleSeen.has(mac)) { this.peopleG.remove(g, g.userData.trail); this.people.delete(mac); }
+    for (const [mac, g] of this.people) if (!peopleSeen.has(mac)) { this.peopleG.remove(g, g.userData.trail); this.people.delete(mac); this.renderer.shadowMap.needsUpdate = true; }
+  }
+
+  // Trail buffers are reused and only grown, so the 4 Hz feed doesn't churn GPU buffers.
+  setTrail(u, trail, color) {
+    const n = trail.length, geo = u.trail.geometry;
+    let pa = geo.attributes.position;
+    if (!pa || pa.count < n) {
+      const cap = Math.max(64, n * 2);
+      pa = new THREE.BufferAttribute(new Float32Array(cap * 3), 3).setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute("position", pa);
+      geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(cap * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    }
+    const P = pa.array, C = geo.attributes.color.array;
+    for (let i = 0; i < n; i++) {
+      const q = trail[i], fade = 0.15 + 0.85 * (i / Math.max(1, n - 1)), c = q[4] === "estimated" ? color : GREY_C;
+      P[i * 3] = q[1]; P[i * 3 + 1] = 0.02; P[i * 3 + 2] = q[2];
+      C[i * 3] = c.r * fade; C[i * 3 + 1] = c.g * fade; C[i * 3 + 2] = c.b * fade;
+    }
+    pa.needsUpdate = true;
+    geo.attributes.color.needsUpdate = true;
+    geo.setDrawRange(0, n >= 2 ? n : 0);
+    geo.computeBoundingSphere();
+  }
+
+  // Slow GPU: drop the pixel ratio to 1 first, then halve the shadow map.
+  degrade() {
+    if (this.pixelRatio > 1) {
+      this.pixelRatio = 1;
+      this.renderer.setPixelRatio(1);
+      this.resize();
+    } else if (this.sun.shadow.mapSize.x > 512) {
+      this.sun.shadow.mapSize.set(512, 512);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+      this.renderer.shadowMap.needsUpdate = true;
+    }
   }
 
   frame() {
-    if (!this.visible) return;
-    const t = (performance.now() - this.start) / 1000;
+    const now = performance.now();
+    if (!this.visible || !this.onScreen) { this.lastTick = 0; return; }
+    const dt = this.lastTick ? Math.min(0.1, (now - this.lastTick) / 1000) : 1 / 60;
+    if (this.lastTick) {
+      this.frameMs += (now - this.lastTick - this.frameMs) * 0.05;
+      this.slowFor = this.frameMs > SLOW_MS ? this.slowFor + dt : 0;
+      if (this.slowFor > SLOW_S) { this.degrade(); this.slowFor = 0; this.frameMs = 16.7; }
+    }
+    this.lastTick = now;
+    // The same glide as 0.12 per frame at 60 fps, whatever the frame rate.
+    const k = 1 - Math.pow(0.88, dt * 60);
+    let moving = this.controls.update() || this.dirty, shadowMoved = false;
     for (const g of this.people.values()) {
       const u = g.userData;
       if (u.target) {
-        const k = u.snap ? 1 : 0.12;
-        u.pos.lerp(u.target, k);
-        u.unc += (u.targetUnc - u.unc) * k;
+        const kk = u.snap ? 1 : k;
+        u.pos.lerp(u.target, kk);
+        u.unc += (u.targetUnc - u.unc) * kk;
+        if (u.pos.distanceToSquared(u.target) > 1e-6 || Math.abs(u.targetUnc - u.unc) > 1e-3) moving = true;
       }
+      if (!u.shadowAt || u.shadowAt.distanceToSquared(u.pos) > SHADOW_MOVE_M * SHADOW_MOVE_M) {
+        (u.shadowAt ??= new THREE.Vector3()).copy(u.pos);
+        shadowMoved = true;
+      }
+    }
+    if (!moving && now - this.lastRender < IDLE_MS) return;
+    this.dirty = false;
+    this.lastRender = now;
+    if (shadowMoved) this.renderer.shadowMap.needsUpdate = true;
+    const t = (now - this.start) / 1000;
+    for (const g of this.people.values()) {
+      const u = g.userData;
       g.position.copy(u.pos);
       const r = Math.max(0.12, u.unc);
       u.disc.scale.setScalar(r);
@@ -309,7 +397,6 @@ class RoomView {
       u.orb.position.y = u.glow.position.y = PERSON_H + (u.stale ? 0 : 0.02 * Math.sin(t * 2));
     }
     for (const b of this.boards.values()) b.userData.halo.scale.setScalar(1 + 0.15 * Math.sin(t * 2.2));
-    this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }
 }

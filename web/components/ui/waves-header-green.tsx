@@ -70,15 +70,6 @@ float hash21(vec2 p) {
   return fract(p.x * p.y);
 }
 
-// Even, un-structured white noise for film grain (Dave Hoskins hash12). The
-// multiply hash above is fine for value noise but shows a faint axis-aligned
-// mesh at integer fragment coords, which reads as a net over flat areas.
-float grainHash(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
-}
-
 vec2 hash22(vec2 p) {
 #ifndef GL_FRAGMENT_PRECISION_HIGH
   p = mod(p, 31.0);
@@ -269,12 +260,40 @@ void main() {
   }
   if (u_cursorPresence > 0.001 && u_cursorEffect > 3.5)
     col += (vec3(0.18) + col * 0.12) * cursorMask * u_cursorStrength;
-  if (u_grain > 0.0001)
-    col += (grainHash(
-      gl_FragCoord.xy + vec2(u_seed * 17.0, u_seed * 31.0)) - 0.5) * u_grain;
   gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
 `
+
+// The field above is smooth, so it renders into a reduced-resolution texture (the expensive part: seven fbm stacks
+// per pixel); this pass upsamples it and adds the grain per screen pixel, so the grain stays as fine as before.
+const PRESENT = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform sampler2D u_field;
+uniform vec4 u_present;   // resolution.xy, grain, seed
+float grainHash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+void main() {
+  vec3 col = texture2D(u_field, gl_FragCoord.xy / u_present.xy).rgb;
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+  float seed = u_present.w;
+#else
+  float seed = mod(u_present.w, 31.0);
+#endif
+  // Even white noise (Dave Hoskins hash12): a multiply hash shows a faint axis-aligned mesh at integer coords.
+  if (u_present.z > 0.0001)
+    col += (grainHash(gl_FragCoord.xy + vec2(seed * 17.0, seed * 31.0)) - 0.5) * u_present.z;
+  gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}
+`
+
+// Field resolution relative to the screen canvas; dropped a step when frames run long (slow GPUs).
+const FIELD_SCALES = [0.5, 0.36, 0.26]
 
 const UNIFORMS = {
   colors: [[0.050980392156862744,0.10588235294117647,0.058823529411764705],[0.24313725490196078,0.5568627450980392,0.2549019607843137],[0.7803921568627451,0.9568627450980393,0.39215686274509803],[1,0.9921568627450981,0.8823529411764706],[1,0.9921568627450981,0.8823529411764706],[1,0.9921568627450981,0.8823529411764706],[1,0.9921568627450981,0.8823529411764706],[1,0.9921568627450981,0.8823529411764706]] as [number, number, number][],
@@ -324,14 +343,20 @@ export function ShaderBackground({ className }: { className?: string }) {
       gl.compileShader(s)
       return s
     }
-    const program = gl.createProgram()!
-    const vertexShader = compile(gl.VERTEX_SHADER, VERT)
-    const fragmentShader = compile(gl.FRAGMENT_SHADER, FRAG)
-    gl.attachShader(program, vertexShader)
-    gl.attachShader(program, fragmentShader)
-    gl.linkProgram(program)
-    gl.deleteShader(vertexShader)
-    gl.deleteShader(fragmentShader)
+    const link = (frag: string) => {
+      const prog = gl.createProgram()!
+      const vs = compile(gl.VERTEX_SHADER, VERT)
+      const fs = compile(gl.FRAGMENT_SHADER, frag)
+      gl.attachShader(prog, vs)
+      gl.attachShader(prog, fs)
+      gl.bindAttribLocation(prog, 0, "a_position")
+      gl.linkProgram(prog)
+      gl.deleteShader(vs)
+      gl.deleteShader(fs)
+      return prog
+    }
+    const program = link(FRAG)
+    const present = link(PRESENT)
     gl.useProgram(program)
 
     const buf = gl.createBuffer()
@@ -341,9 +366,23 @@ export function ShaderBackground({ className }: { className?: string }) {
       new Float32Array([-1, -1, 3, -1, -1, 3]),
       gl.STATIC_DRAW,
     )
-    const loc = gl.getAttribLocation(program, "a_position")
-    gl.enableVertexAttribArray(loc)
-    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
+    gl.enableVertexAttribArray(0)
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0)
+
+    const fieldTex = gl.createTexture()
+    gl.bindTexture(gl.TEXTURE_2D, fieldTex)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    const fbo = gl.createFramebuffer()
+    let fieldW = 0
+    let fieldH = 0
+    let scaleStep = 0
+    const presentRes = gl.getUniformLocation(present, "u_present")
+    gl.useProgram(present)
+    gl.uniform1i(gl.getUniformLocation(present, "u_field"), 0)
+    gl.useProgram(program)
 
     const uni = {
       colors: gl.getUniformLocation(program, "u_colors"),
@@ -424,9 +463,22 @@ export function ShaderBackground({ className }: { className?: string }) {
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width
         canvas.height = height
-        gl.viewport(0, 0, width, height)
+      }
+      const fw = Math.max(1, Math.round(width * FIELD_SCALES[scaleStep]))
+      const fh = Math.max(1, Math.round(height * FIELD_SCALES[scaleStep]))
+      if (fw !== fieldW || fh !== fieldH) {
+        fieldW = fw
+        fieldH = fh
+        gl.bindTexture(gl.TEXTURE_2D, fieldTex)
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fw, fh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fieldTex, 0)
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null)
       }
     }
+    // rAF intervals, smoothed; a long run of slow frames steps the field resolution down.
+    let frameMs = 16.7
+    let slowFor = 0
 
     function requestRender() {
       if (!disposed && visible && inView && raf === 0) {
@@ -512,18 +564,28 @@ export function ShaderBackground({ className }: { className?: string }) {
       raf = 0
       if (disposed || !visible || !inView) return
       const dt = lastNow === null ? 0 : Math.min((now - lastNow) / 1000, 0.1)
+      if (lastNow !== null && now - lastNow < 250) {
+        frameMs += (now - lastNow - frameMs) * 0.05
+        slowFor = frameMs > 24 ? slowFor + dt : 0
+        if (slowFor > 1.5 && scaleStep < FIELD_SCALES.length - 1) {
+          scaleStep++
+          slowFor = 0
+          frameMs = 16.7
+        }
+      }
       lastNow = now
       const follow = 1 - Math.exp(-12 * dt)
       mouseX += (targetX - mouseX) * follow
       mouseY += (targetY - mouseY) * follow
       cursorPresence += (targetPresence - cursorPresence) * follow
       resizeCanvas()
-      const width = canvas.width
-      const height = canvas.height
+      gl.useProgram(program)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
+      gl.viewport(0, 0, fieldW, fieldH)
       gl.uniform4f(
         uni.scene,
-        width,
-        height,
+        fieldW,
+        fieldH,
         reducedMotion ? 0 : ((now - start) / 1000) * UNIFORMS.timeScale,
         UNIFORMS.colorCount,
       )
@@ -541,6 +603,12 @@ export function ShaderBackground({ className }: { className?: string }) {
         UNIFORMS.cursorStrength,
         UNIFORMS.cursorRadius,
       )
+      gl.drawArrays(gl.TRIANGLES, 0, 3)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+      gl.viewport(0, 0, canvas.width, canvas.height)
+      gl.useProgram(present)
+      gl.bindTexture(gl.TEXTURE_2D, fieldTex)
+      gl.uniform4f(presentRes, canvas.width, canvas.height, UNIFORMS.grain, UNIFORMS.seed)
       gl.drawArrays(gl.TRIANGLES, 0, 3)
       const pointerSettling =
         Math.abs(targetX - mouseX) > 0.001 ||
@@ -568,7 +636,10 @@ export function ShaderBackground({ className }: { className?: string }) {
         )
       }
       gl.deleteBuffer(buf)
+      gl.deleteFramebuffer(fbo)
+      gl.deleteTexture(fieldTex)
       gl.deleteProgram(program)
+      gl.deleteProgram(present)
       const releaseTimer = window.setTimeout(() => {
         if (pendingContextReleases.get(canvas) !== releaseTimer) return
         pendingContextReleases.delete(canvas)

@@ -94,13 +94,20 @@ export function mthRandom(seed: number) {
  * into a point or tears holes in the swarm; it only folds it.
  */
 export function mthCurl(x: number, y: number, t: number) {
+  return mthCurlInto([0, 0], x, y, t)
+}
+
+/** mthCurl written into out, so the per-moth loop allocates nothing. */
+export function mthCurlInto(out: number[], x: number, y: number, t: number) {
   const a = 1.7 * x + t
   const b = 1.3 * y - 0.6 * t
   const c = 2.9 * y + 1.1 * x - 0.8 * t
   const d = 4.3 * x - 3.7 * y + 1.3 * t
   const dpdx = 1.7 * Math.cos(a) * Math.cos(b) + 0.6 * 1.1 * Math.cos(c) - 0.35 * 4.3 * Math.sin(d)
   const dpdy = -1.3 * Math.sin(a) * Math.sin(b) + 0.6 * 2.9 * Math.cos(c) + 0.35 * 3.7 * Math.sin(d)
-  return [dpdy, -dpdx]
+  out[0] = dpdy
+  out[1] = -dpdx
+  return out
 }
 
 /** The swarm's wandering centre in unit space ([-1, 1] across the width). Fast. */
@@ -212,6 +219,7 @@ export default function MothWordmark({
     let modeT = 0
     let disturb = 0
     const rand = mthRandom(11)
+    const curl = [0, 0]
 
     const layout = () => {
       const rect = root.getBoundingClientRect()
@@ -222,10 +230,13 @@ export default function MothWordmark({
       canvas.height = Math.round(h * dpr)
 
       // Sky: a vertical gradient, a glow low on the horizon, grain.
-      sky = document.createElement("canvas")
-      sky.width = canvas.width
-      sky.height = canvas.height
-      const s = sky.getContext("2d")
+      // Skipped when transparent: it is never drawn, and the grain alone is ~w*h/10 fillRects per resize.
+      sky = transparent ? null : document.createElement("canvas")
+      if (sky) {
+        sky.width = canvas.width
+        sky.height = canvas.height
+      }
+      const s = sky && sky.getContext("2d")
       if (s) {
         s.setTransform(dpr, 0, 0, dpr, 0, 0)
         const g = s.createLinearGradient(0, 0, 0, h)
@@ -375,6 +386,7 @@ export default function MothWordmark({
       const batR = u * 0.16
       const free = 1 - pull
       let hits = 0
+      const cv = curl
 
       for (let i = 0; i < n; i++) {
         const x = px[i]
@@ -384,7 +396,7 @@ export default function MothWordmark({
         // Free flight: a fast current folds the swarm, the centre holds it together.
         const fx = (x - w / 2) / u
         const fy = (y - h / 2) / u
-        const cv = mthCurl(fx * 2.6 + depth[i] * 0.3, fy * 2.6, t)
+        mthCurlInto(cv, fx * 2.6 + depth[i] * 0.3, fy * 2.6, t)
         ax += cv[0] * 950 * free
         ay += cv[1] * 950 * free
         const dxC = cxp - x
