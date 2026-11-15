@@ -20,6 +20,7 @@ firmware/luna_node/main/luna_secrets.h
 *.pem
 *.key
 .env
+.env.local
 
 # Personal data: recordings, calibration, device MACs
 data/*
@@ -62,4 +63,7 @@ desktop.ini
 # Frontend (web/): deps and build output
 node_modules/
 web/static/
+
+# Vultr tokens (cloud/README.md)
 config/cloud.json
+config/cloud.*backup*.json

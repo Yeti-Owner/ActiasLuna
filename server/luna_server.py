@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(1, str(Path(__file__).resolve().parents[1] / "tools"))
 
+import cloud_sync  # noqa: E402
 import import_scan  # noqa: E402
 import lab  # noqa: E402
 import planner  # noqa: E402
@@ -197,6 +198,9 @@ class App:
         self.mark_results = {}
         # mac -> time of the last finger point saved as calibration (save_phone_traces takes only newer strokes).
         self.trace_saved = {}
+        self.cloud = None
+        self.cloud_run = ""
+        self.cloud_obs = cloud_sync.Observer()
         self._rebuild()
 
     @staticmethod
@@ -825,6 +829,38 @@ class App:
             elif delay > 0:
                 time.sleep(delay)
 
+    def start_cloud(self):
+        """Upload room activity to the Moth cloud when config/cloud.json is filled in (cloud_sync)."""
+        path = Path(self.args.cloud_config) if self.args.cloud_config else ROOT / "config" / "cloud.json"
+        if self.args.targets and not self.args.cloud_config:
+            print("cloud: off while simulating boards (pass --cloud-config to upload anyway)", flush=True)
+            return
+        conf = cloud_sync.load_config(path)
+        if conf is None:
+            print("cloud: off (copy config/cloud.example.json to config/cloud.json and fill it in)", flush=True)
+            return
+        self.cloud = cloud_sync.Uploader(conf, cloud_sync.Spool(DATA / f"cloud_spool_{conf['room']}.jsonl"),
+                                         log=lambda m: print(m, flush=True))
+        self.cloud_run = cloud_sync.new_run_id(time.time())
+        print(f"cloud: this is {self.cloud_run}", flush=True)
+        threading.Thread(target=self.cloud.run, daemon=True).start()
+        threading.Thread(target=self.cloud_loop, daemon=True).start()
+
+    def cloud_loop(self):
+        while True:
+            time.sleep(cloud_sync.OBSERVE_S)
+            try:
+                now = time.time()
+                with self.lock:
+                    points = cloud_sync.points_from(self.layout, self.live.label, self.cloud.cfg.get("points"))
+                    seen, nearby, watching = cloud_sync.sightings(self.live, self.layout, self.cloud_obs, now)
+                    out = self.cloud_obs.step(now, seen, points, nearby, watching)
+                self.cloud.points = points
+                for kind, key in (("s", "samples"), ("p", "positions"), ("e", "events")):
+                    self.cloud.spool.add(kind, out[key], self.cloud_run)
+            except Exception:
+                traceback.print_exc()
+
     def _tracked_center(self):
         """Where the real person is (layout frame): a live phone's estimate, else the phone-free body, else None."""
         for ph in self.live.phones.values():
@@ -934,6 +970,8 @@ class App:
                      "settings_defaults": cfg.DEFAULTS, "lab": self.lab,
                      "furniture_prior": bool(self.blocked), "ssid": self.net.get("ssid"), "wall": time.time()}
             extra["decoys"] = self._decoy_snapshot()
+            extra["cloud"] = ({"run": self.cloud_run, "state": self.cloud.state, "spooled": len(self.cloud.spool),
+                               "url": self.cloud.cfg["url"]} if self.cloud else {"state": "off"})
             return self._jam(self.live.snapshot(extra))
 
     def snapshot_json(self) -> str:
@@ -1436,6 +1474,8 @@ def main():
                         help="UDP port the Uno Q white button toggles the simulated decoys on (0 = off)")
     parser.add_argument("--targets", default="", help="board addresses host:port,... (simulator)")
     parser.add_argument("--no-record", action="store_true")
+    parser.add_argument("--no-cloud", action="store_true", help="don't upload room activity to the Moth cloud")
+    parser.add_argument("--cloud-config", default="", help="cloud settings file (default config/cloud.json)")
     parser.add_argument("--phone-port", type=int, default=int(net.get("phone_port", 8081)),
                         help="port for the phone calibration page on the demo Wi-Fi (0 = off)")
     args = parser.parse_args()
@@ -1455,6 +1495,8 @@ def main():
         _start_phone_server(args.phone_port)
     if not args.no_record:
         APP.set_recording(True)
+    if not args.no_cloud:
+        APP.start_cloud()
     loops = [APP.udp_loop, APP.subscribe_loop, APP.tick_loop]
     if args.decoy_udp_port:
         loops.append(APP.decoy_udp_loop)

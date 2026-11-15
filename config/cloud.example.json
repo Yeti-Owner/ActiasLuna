@@ -1,0 +1,6 @@
+{
+  "url": "https://YOUR-VULTR-IP-WITH-DASHES.sslip.io",
+  "ingest_token": "paste the INGEST token from deploy.sh here",
+  "query_token": "paste the QUERY token from deploy.sh here (chert/setup.ps1 copies it to the agent)",
+  "room": "demo-room"
+}
