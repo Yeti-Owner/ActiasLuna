@@ -260,7 +260,7 @@
     if (state.boards) {
       for (const b of state.boards) {
         svgHtml += `<circle cx="${b.x}" cy="${b.y}" r="0.16" fill="#8FD3A5"/>`;
-        svgHtml += `<text x="${b.x}" y="${b.y + 0.32}" font-size="0.2" fill="#FFFFFF" text-anchor="middle" font-family="monospace">${b.label}</text>`;
+        svgHtml += `<text x="${b.x}" y="${b.y + 0.32}" font-size="0.2" fill="#FFFFFF" text-anchor="middle" font-family="monospace">${b.name || b.label}</text>`;
       }
     }
 

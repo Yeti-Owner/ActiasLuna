@@ -1,9 +1,10 @@
 """Moth cloud: room activity history for one monitored room. Runs on a Vultr VM; standard library only (Python 3.9+).
 
 The laptop server (server/cloud_sync.py inside luna_server) POSTs what it sees: occupancy counts, the live X/Y of each
-person in the room, and events (entered, stood by point A, moved on, left). The Chert FaceTime agent holds the QUERY
-token, which can only call the read endpoints; each answers with JSON plus a plain-English `answer` a voice agent can
-say out loud ("Someone entered 30 seconds ago, stood by point A for 10 seconds, then wandered to point B, then left").
+person in the room, and events (entered, stood by the Amazon Alexa, moved on, left). The Chert FaceTime agent holds the
+QUERY token, which can only call the read endpoints; each answers with JSON plus a plain-English `answer` a voice agent
+can say out loud ("Someone entered 30 seconds ago, stood by the Amazon Alexa for 10 seconds, then wandered to the Smart
+Thermostat, then left"). Points keep short IDs (A, B, C) in every field; "point_names" only changes how they are said.
 
 PRIVACY: people arrive as per-run pseudonyms ("person-1", "body"); no MAC addresses, names or IPs are ever stored.
 Simulated decoys never reach this service. Positions are deleted after --position-days, everything else after
@@ -12,7 +13,8 @@ Simulated decoys never reach this service. Positions are deleted after --positio
 Endpoints (metres and epoch seconds on the wire)
   GET  /health                               no auth
   POST /ingest           Bearer INGEST       {"room", "run", "samples": [{t, in, nearby, zones}], "positions": [{t, pid, x, y}],
-                                              "events": [{t, pid, kind, point?, dur?, x?, y?}], "points": {"A": [x, y]}}
+                                              "events": [{t, pid, kind, point?, dur?, x?, y?}], "points": {"A": [x, y]},
+                                              "point_names": {"A": "Amazon Alexa"}}
   GET  /api/now          Bearer QUERY        ?room=&tz=                -> is anyone in the room right now?
   GET  /api/recent       Bearer QUERY        ?minutes=10               -> what happened in the last N minutes
   GET  /api/where        Bearer QUERY        ?                         -> where each person is right now
@@ -63,6 +65,7 @@ ROOM_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 ZONE_RE = re.compile(r"^[A-Za-z0-9_. -]{1,32}$")
 PID_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 RUN_RE = re.compile(r"^[A-Za-z0-9_.-]{0,64}$")
+NAME_RE = re.compile(r"^[A-Za-z0-9 _.'&-]{1,40}$")
 BOARD_KINDS = ("board_offline", "board_online")     # pid "board", point = the board's label (cloud_sync.Observer)
 KINDS = ("enter", "leave", "arrive", "depart") + BOARD_KINDS
 
@@ -203,6 +206,24 @@ class Store:
     def points(self, room):
         with self.lock:
             row = self.db.execute("SELECT v FROM meta WHERE room = ? AND k = 'points'", (room,)).fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def set_point_names(self, room, names):
+        room = self._room(room)
+        if not isinstance(names, dict) or len(names) > 16:
+            raise ValueError("point_names must be an object of at most 16 entries")
+        clean = {}
+        for k, v in names.items():
+            if not ZONE_RE.match(str(k)) or not NAME_RE.match(str(v)):
+                raise ValueError("bad point name")
+            clean[str(k)] = str(v).strip()
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES (?, 'point_names', ?)", (room, json.dumps(clean)))
+            self.db.commit()
+
+    def point_names(self, room):
+        with self.lock:
+            row = self.db.execute("SELECT v FROM meta WHERE room = ? AND k = 'point_names'", (room,)).fetchone()
         return json.loads(row[0]) if row else {}
 
     def range(self, room, t0, t1, run=None):
@@ -452,16 +473,27 @@ def _spoken_stops(stops):
     return merged[:1] + [summary] + merged[-SPOKEN_TAIL_STOPS:]
 
 
-def _points_list(points):
-    names = [f"point {p}" for p in points]
-    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+def _spot(p, names):
+    """A point said aloud: "the Fridge" when the laptop named it (Store.point_names), else "point A"."""
+    n = names.get(p) if names else None
+    return f"the {n}" if n else f"point {p}"
 
 
-def _board_phrase(e):
-    return f"board {e['point']} " + ("went offline" if e["kind"] == "board_offline" else "came back online")
+def _board(b, names):
+    n = names.get(b) if names else None
+    return f"the sensor by the {n}" if n else f"board {b}"
 
 
-def _visit_sentence(v, t0, now, tz, board_events=()):
+def _points_list(points, names=None):
+    said = [_spot(p, names) for p in points]
+    return said[0] if len(said) == 1 else ", ".join(said[:-1]) + " and " + said[-1]
+
+
+def _board_phrase(e, names=None):
+    return f"{_board(e['point'], names)} " + ("went offline" if e["kind"] == "board_offline" else "came back online")
+
+
+def _visit_sentence(v, t0, now, tz, board_events=(), names=None):
     """board_events: board changes during this visit, woven in by time."""
     parts = []
     if v["start"] is not None and v["start"] >= t0:
@@ -473,13 +505,13 @@ def _visit_sentence(v, t0, now, tz, board_events=()):
     still_at = None
     for i, (_, _, s) in enumerate(items):
         if "kind" in s:
-            parts.append("then " + _board_phrase(s))
+            parts.append("then " + _board_phrase(s, names))
             continue
         if "between" in s:
-            parts.append(f"then moved around {_points_list(s['between'])} for {_short(s['seconds'])}, "
-                         f"mostly by point {s['mostly']}")
+            parts.append(f"then moved around {_points_list(s['between'], names)} for {_short(s['seconds'])}, "
+                         f"mostly by {_spot(s['mostly'], names)}")
             continue
-        p = f"point {s['point']}"
+        p = _spot(s["point"], names)
         if s["end"] is None and i < len(items) - 1:
             # A board change came after they reached this point: say where they are once the story is told.
             parts.append(f"stood by {p}" if i == 0 else f"then wandered to {p}")
@@ -529,12 +561,12 @@ def boards_down(store, room, now, run=None):
     return {b: e["t"] for b, e in sorted(state.items()) if e["kind"] == "board_offline"}
 
 
-def _down_note(down, now, tz, mentioned=()):
+def _down_note(down, now, tz, mentioned=(), names=None):
     """One sentence on boards still offline; boards the story already said went offline just get "still"."""
     if not down:
         return None
-    bits = [f"board {b} is still offline" if b in mentioned else f"board {b} went offline {_when(t, now, tz)} "
-            f"and is still offline" for b, t in down.items()]
+    bits = [f"{_board(b, names)} is still offline" if b in mentioned else f"{_board(b, names)} went offline "
+            f"{_when(t, now, tz)} and is still offline" for b, t in down.items()]
     text = "; ".join(bits) + ", so tracking near " + ("it" if len(down) == 1 else "them") + " may be off."
     return ("Heads up: " + text) if not all(b in mentioned for b in down) else text[0].upper() + text[1:]
 
@@ -546,6 +578,7 @@ def describe_activity(store, room, t0, t1, tz, now=None, run=None):
     vs = [v for v in visits(events)
           if (v["end"] is None or v["end"] >= t0) and (v["start"] is None or v["start"] < t1)]
     board_ev = [e for e in events if e["kind"] in BOARD_KINDS and t0 <= e["t"] < t1]
+    names = store.point_names(room)
     note = _reporting_note(store, room, t1, now, run)
     if store.last_report(room, run) is None:
         return {"room": room, "answer": note, "visits": []}
@@ -559,11 +592,11 @@ def describe_activity(store, room, t0, t1, tz, now=None, run=None):
         told.update(id(e) for e in mine)
         return mine
 
-    sentences = [(v["start"] if v["start"] is not None else t0, _visit_sentence(v, t0, now, tz, during(v)))
+    sentences = [(v["start"] if v["start"] is not None else t0, _visit_sentence(v, t0, now, tz, during(v), names))
                  for v in spoken]
     # Board changes while nobody was in the room get their own short sentence, in time order with the visits.
-    sentences += [(e["t"], f"{_board_phrase(e)[0].upper()}{_board_phrase(e)[1:]} {_when(e['t'], now, tz)}.")
-                  for e in board_ev if id(e) not in told]
+    sentences += [(e["t"], f"{_board_phrase(e, names)[0].upper()}{_board_phrase(e, names)[1:]} "
+                           f"{_when(e['t'], now, tz)}.") for e in board_ev if id(e) not in told]
     sentences.sort(key=lambda s: s[0])
     if not vs:
         window = _short(min(t1, now) - t0) if t1 >= now - 1 else None
@@ -582,7 +615,7 @@ def describe_activity(store, room, t0, t1, tz, now=None, run=None):
         down = boards_down(store, room, now, run)
         if down:
             mentioned = {e["point"] for e in board_ev if e["kind"] == "board_offline"}
-            answer += " " + _down_note(down, now, tz, mentioned)
+            answer += " " + _down_note(down, now, tz, mentioned, names)
     if note:
         answer = note + " " + answer
     return {"room": room, "answer": answer, "visits": [_visit_json(v, tz) for v in vs],
@@ -597,7 +630,7 @@ def where_now(store, room, tz, now=None, run=None):
     for p in recent:
         latest[p["pid"]] = p
     vs = {v["pid"]: v for v in visits(store.events(room, now - LOOKBACK_S, now + 1, run)) if v["end"] is None}
-    points = store.points(room)
+    points, names = store.points(room), store.point_names(room)
     people, bits = [], []
     for pid, p in sorted(latest.items()):
         v = vs.get(pid)
@@ -607,10 +640,11 @@ def where_now(store, room, tz, now=None, run=None):
             near = min(points, key=lambda k: math.hypot(points[k][0] - p["x"], points[k][1] - p["y"]))
             dist = math.hypot(points[near][0] - p["x"], points[near][1] - p["y"])
         if stop:
-            bits.append(f"one is standing by point {stop['point']} (for {_short(now - stop['start'])} so far)")
+            bits.append(f"one is standing by {_spot(stop['point'], names)} "
+                        f"(for {_short(now - stop['start'])} so far)")
         elif near is not None:
             feet = max(1, round(dist / 0.3048))     # metres on the wire, feet when spoken
-            bits.append(f"one is moving around about {feet} {'foot' if feet == 1 else 'feet'} from point {near}")
+            bits.append(f"one is moving around about {feet} {'foot' if feet == 1 else 'feet'} from {_spot(near, names)}")
         else:
             bits.append("one is moving around the room")
         people.append({"person": pid, "x": round(p["x"], 2), "y": round(p["y"], 2), "t": round(p["t"], 2),
@@ -624,10 +658,11 @@ def where_now(store, room, tz, now=None, run=None):
         answer = f"There are {len(people)} people in the room: " + "; ".join(bits) + "."
     down = boards_down(store, room, now, run)
     if down:
-        answer += " " + _down_note(down, now, tz)
+        answer += " " + _down_note(down, now, tz, names=names)
     if note:
         answer = note + " " + answer
-    return {"room": room, "answer": answer, "people": people, "points": points, "boards_offline": sorted(down)}
+    return {"room": room, "answer": answer, "people": people, "points": points, "point_names": names,
+            "boards_offline": sorted(down)}
 
 
 def summarize_day(store, room, day, tz, run=None):
@@ -638,6 +673,7 @@ def summarize_day(store, room, day, tz, run=None):
     near = intervals(samples, key=2)
     covered = coverage(samples, t0, t1)
     label = _day(t0 + 3600, tz)
+    names = store.point_names(room)
     if not samples:
         answer = f"I have no sensor data for {label}, so I can't say whether anyone was in the room."
     elif not ins:
@@ -647,7 +683,7 @@ def summarize_day(store, room, day, tz, run=None):
         for iv in ins:
             bit = f"{_span(iv, tz)} ({_people(iv['peak'])}"
             z = _top_zone(iv["zones"])
-            bit += f", mostly near point {z})" if z else ")"
+            bit += f", mostly near {_spot(z, names)})" if z else ")"
             parts.append(bit)
         minutes = round(sum(iv["end"] - iv["start"] for iv in ins) / 60)
         times = "once" if len(ins) == 1 else f"{len(ins)} times"
@@ -673,6 +709,7 @@ def status_now(store, room, tz, now=None, run=None):
     if last is None:
         return {"room": room, "status": "no_data", "answer": "I don't have any sensor data for that room yet."}
     t, n_in, n_near, zones = last
+    names = store.point_names(room)
     age = now - t
     if age > MAX_GAP_S:
         mins = round(age / 60)
@@ -684,7 +721,7 @@ def status_now(store, room, tz, now=None, run=None):
         since = intervals(recent, key=1)[-1]["start"]
         z = _top_zone(zones)
         answer = f"Yes. There {'is' if n_in == 1 else 'are'} {_people(n_in)} in the room right now" + \
-                 (f", mostly near point {z}." if z else ".") + f" It's been occupied for {_short(now - since)}."
+                 (f", mostly near {_spot(z, names)}." if z else ".") + f" It's been occupied for {_short(now - since)}."
         status = "occupied"
     else:
         past = intervals(recent, key=1)
@@ -696,9 +733,9 @@ def status_now(store, room, tz, now=None, run=None):
                   f"but {'are' if n_near != 1 else 'is'}n't placed inside the room."
     down = boards_down(store, room, now, run)
     if down:
-        answer += " " + _down_note(down, now, tz)
+        answer += " " + _down_note(down, now, tz, names=names)
     return {"room": room, "status": status, "in": n_in, "nearby": n_near, "zones": zones,
-            "last_report": round(t), "answer": answer, "boards_offline": sorted(down)}
+            "last_report": round(t), "answer": answer, "boards_offline": sorted(down), "point_names": names}
 
 
 def _parse_when(value, tz):
@@ -751,6 +788,8 @@ def make_server(host, port, store, ingest_token, query_token, default_tz="UTC", 
                        "events_stored": store.add_events(room, body.get("events"), run)}
                 if body.get("points"):
                     store.set_points(room, body["points"])
+                if body.get("point_names"):
+                    store.set_point_names(room, body["point_names"])
             except (ValueError, KeyError, TypeError, AttributeError) as exc:
                 return self._send(400, {"error": str(exc)})
             self._send(200, out)
@@ -812,7 +851,7 @@ def make_server(host, port, store, ingest_token, query_token, default_tz="UTC", 
                     t1 = _parse_when(q.get("to"), tz) or now
                     t0 = _parse_when(q.get("from"), tz) or t1 - 600
                     return send({"room": room, "positions": store.positions(room, t0, t1, q.get("pid"), run=run),
-                                 "points": store.points(room)})
+                                 "points": store.points(room), "point_names": store.point_names(room)})
                 if url.path == "/api/summary":
                     day = datetime.date.fromisoformat(q["date"]) if q.get("date") else \
                         datetime.datetime.now(tz).date()

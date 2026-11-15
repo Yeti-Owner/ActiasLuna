@@ -125,11 +125,16 @@ def selftest_story(cloud):
     ev = [("enter", None, 25), ("arrive", "A", 23), ("depart", "A", 13), ("arrive", "B", 10), ("depart", "B", 6),
           ("leave", None, 4)]
     events = [{"t": now - ago, "pid": "person-1", "kind": k, **({"point": p} if p else {})} for k, p, ago in ev]
-    http(url + "/ingest", cloud["ingest_token"], {"room": SELFTEST_ROOM, "run": run, "events": events,
-                                                  "samples": [{"t": now - 1, "in": 0}]})
+    boards = json.loads((ROOT / "config" / "boards.json").read_text(encoding="utf-8")).get("boards", [])
+    names = {b["label"]: b["name"] for b in boards if b.get("label") and b.get("name")}
+    body = {"room": SELFTEST_ROOM, "run": run, "events": events, "samples": [{"t": now - 1, "in": 0}]}
+    if names:
+        body["point_names"] = names
+    http(url + "/ingest", cloud["ingest_token"], body)
     _, out, _ = http(f"{url}/api/recent?room={SELFTEST_ROOM}&run={run}&minutes=5", cloud["query_token"])
-    want = ("Someone entered 25 seconds ago, stood by point A for 10 seconds, then wandered to point B and stood "
-            "there for 4 seconds, then left just now.")
+    said = {p: f"the {names[p]}" if p in names else f"point {p}" for p in ("A", "B")}    # moth_cloud._spot
+    want = (f"Someone entered 25 seconds ago, stood by {said['A']} for 10 seconds, then wandered to {said['B']} and "
+            "stood there for 4 seconds, then left just now.")
     if out.get("answer") == want:
         report("OK", "Vultr round trip: wrote a test visit, read back the right story", f'"{out["answer"]}"')
     else:

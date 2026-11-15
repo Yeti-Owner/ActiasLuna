@@ -866,6 +866,7 @@ class App:
                     boards = cloud_sync.board_status(self.live, self.layout)
                     out = self.cloud_obs.step(now, seen, points, nearby, watching, boards)
                 self.cloud.points = points
+                self.cloud.point_names = cloud_sync.point_names(self.boards, self.cloud.cfg.get("point_names"))
                 for kind, key in (("s", "samples"), ("p", "positions"), ("e", "events")):
                     self.cloud.spool.add(kind, out[key], self.cloud_run)
             except Exception:
@@ -1030,7 +1031,7 @@ class App:
         layout = self.layout
         route, checks = self.route()
         out = {"polygon": layout["polygon"],
-               "boards": [{"label": self.live.label(k), "x": v["x"], "y": v["y"]}
+               "boards": [{"label": self.live.label(k), "name": self.live.name(k), "x": v["x"], "y": v["y"]}
                           for k, v in layout["receivers"].items()],
                "objects": [{"label": o["label"], "footprint": o["footprint"]} for o in self.scan_objects],
                "route": route, "checks": checks, "walks": len(self.calib.get("walks", [])),

@@ -31,7 +31,8 @@ function colorFor(mac) {
   if (!colors[mac]) colors[mac] = PALETTE[Object.keys(colors).length % PALETTE.length];
   return colors[mac];
 }
-const nodeLabel = (id) => S?.nodes.find((n) => n.id === id)?.label ?? String(id).slice(-4);
+// Display name from config/boards.json ("Fridge"); the A/B/C label is the fallback.
+const nodeLabel = (id) => { const n = S?.nodes.find((q) => q.id === id); return n?.name || n?.label || String(id).slice(-4); };
 const age = (a) => (a == null ? "—" : a < 1 ? "now" : a < 90 ? a.toFixed(0) + "s" : (a / 60).toFixed(0) + "m");
 
 async function api(path, body) {
@@ -250,7 +251,7 @@ function renderSetup() {
   if (document.activeElement !== $("sRoomH")) $("sRoomH").value = ft(b.y1 - b.y0);
 
   const unplaced = S.nodes.filter((n) => !S.layout.receivers[n.id]).length;
-  const chips = S.nodes.map((n) => `<span class="rxchip"><span class="dot ${n.status}"></span>${esc(n.label)}</span>`).join("");
+  const chips = S.nodes.map((n) => `<span class="rxchip"><span class="dot ${n.status}"></span>${esc(n.name || n.label)}</span>`).join("");
   const boardsDone = setStep("stBoards", S.nodes.length >= 3 && !unplaced,
     S.nodes.length ? chips + (unplaced ? ` <span class="warnbox">${unplaced} to place</span>` : "") : '<span class="warnbox">none heard</span>');
 
@@ -293,7 +294,7 @@ function renderTables() {
   $("nodesT").innerHTML = "<tr><th>Board</th><th>role</th><th>seen</th><th>pkt/s</th><th title='phone frames per second; in brackets those from RTS/BlockAck/PS-Poll control frames'>frames/s</th><th>loss</th><th>notes</th></tr>" +
     S.nodes.map((n) => {
       const notes = (n.reboots ? `reboots ${n.reboots} ` : "") + (n.disc ? `disc ${n.disc} ` : "") + (n.ovf ? `ovf ${n.ovf}` : "");
-      return `<tr title="${esc(n.id)} ${esc(n.ip)} fw ${esc(n.fw)}"><td><span class="dot ${n.status}"></span>${esc(n.label)}</td><td>${esc(n.role)}</td>
+      return `<tr title="${esc(n.id)} ${esc(n.ip)} fw ${esc(n.fw)}"><td><span class="dot ${n.status}"></span>${esc(n.name || n.label)}</td><td>${esc(n.role)}</td>
         <td>${age(n.age)}</td><td>${n.pkt_rate}</td><td>${n.frame_rate}${n.ctrl_rate ? ` <span class="muted">(${n.ctrl_rate} ctl)</span>` : ""}</td>
         <td>${n.loss_pct}%</td><td class="small muted">${notes}</td></tr>`;
     }).join("") + (S.nodes.length ? "" : '<tr><td colspan=7 class="muted">no boards heard yet</td></tr>');

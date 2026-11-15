@@ -16,6 +16,7 @@ function fmtFt(m: number): string {
 export interface ReceiverNode {
   id: string
   label: string
+  name?: string   // config/boards.json display name ("Fridge"); label (A/B/C) is the ID
   role: 'ap' | 'rx'
   status: 'online' | 'stale' | 'offline'
   age: number | null
@@ -158,9 +159,9 @@ const DEFAULT_DEMO_STATE: SnapshotState = {
   laptop_ip: "192.168.4.3",
   view: "live",
   nodes: [
-    { id: "node_a", label: "A", role: "ap", status: "online", age: 0.1, ip: "192.168.4.1", fw: "0.5.0", pkt_rate: 6.4, frame_rate: 52.1, loss_pct: 0.0, reboots: 0 },
-    { id: "node_b", label: "B", role: "rx", status: "online", age: 0.2, ip: "192.168.4.11", fw: "0.5.0", pkt_rate: 5.8, frame_rate: 49.3, loss_pct: 0.1, reboots: 0 },
-    { id: "node_c", label: "C", role: "rx", status: "online", age: 0.1, ip: "192.168.4.12", fw: "0.5.0", pkt_rate: 6.1, frame_rate: 50.8, loss_pct: 0.0, reboots: 0 }
+    { id: "node_a", label: "A", name: "Amazon Alexa", role: "ap", status: "online", age: 0.1, ip: "192.168.4.1", fw: "0.5.0", pkt_rate: 6.4, frame_rate: 52.1, loss_pct: 0.0, reboots: 0 },
+    { id: "node_b", label: "B", name: "Smart Thermostat", role: "rx", status: "online", age: 0.2, ip: "192.168.4.11", fw: "0.5.0", pkt_rate: 5.8, frame_rate: 49.3, loss_pct: 0.1, reboots: 0 },
+    { id: "node_c", label: "C", name: "Fridge", role: "rx", status: "online", age: 0.1, ip: "192.168.4.12", fw: "0.5.0", pkt_rate: 6.1, frame_rate: 50.8, loss_pct: 0.0, reboots: 0 }
   ],
   phones: [
     {
@@ -600,7 +601,7 @@ export default function DashboardApp() {
 
               {/* Status footer for map */}
               <div className="mt-4 flex flex-wrap items-center justify-between text-xs text-white/70 font-serif">
-                <span>Receivers: {state.nodes.map(n => `${n.label} (${n.status})`).join(', ')}</span>
+                <span>Receivers: {state.nodes.map(n => `${n.name || n.label} (${n.status})`).join(', ')}</span>
                 <span>Active Trackers: {activePeople.length}</span>
               </div>
             </div>
@@ -659,7 +660,7 @@ export default function DashboardApp() {
                     <div key={node.id} className="flex items-center justify-between text-xs border-b border-white/10 pb-2">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-sm bg-white/10 w-6 h-6 rounded flex items-center justify-center font-serif">
-                          {node.label}
+                          {node.name || node.label}
                         </span>
                         <div>
                           <span className="font-medium text-white">{node.role.toUpperCase()} Node</span>
@@ -805,7 +806,7 @@ export default function DashboardApp() {
                       return (
                         <div key={n.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
                           <div className="flex items-center justify-between mb-2">
-                            <span className="font-bold text-white font-serif text-xs">Node {n.label} ({n.role})</span>
+                            <span className="font-bold text-white font-serif text-xs">{n.name || n.label} ({n.role})</span>
                             <span className="text-[10px] text-white/50 font-serif">{n.id}</span>
                           </div>
                           <div className="grid grid-cols-2 gap-2 text-xs font-serif">
@@ -1045,7 +1046,7 @@ export default function DashboardApp() {
                       <tbody>
                         {state.nodes.map(n => (
                           <tr key={n.id} className="border-b border-white/5 hover:bg-white/5">
-                            <td className="py-2.5 font-bold text-white">{n.label} ({n.id.slice(-4)})</td>
+                            <td className="py-2.5 font-bold text-white">{n.name || n.label} ({n.id.slice(-4)})</td>
                             <td className="py-2.5 uppercase">{n.role}</td>
                             <td className="py-2.5">
                               <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
@@ -1244,7 +1245,7 @@ function FloorPlanSvg({
               textAnchor="middle"
               fontFamily="Geist Serif, Georgia, serif"
             >
-              {node.label}
+              {node.name || node.label}
             </text>
           </g>
         )

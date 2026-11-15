@@ -1,6 +1,7 @@
 // 3D room on the frontend laptop, fed by server/room_viewer.py's /api/cloud/room (people from Vultr, no boards).
 // view3d.update() takes the dashboard snapshot shape, so the cloud people are dressed as S.phones and the cloud's
-// points (A/B/C, which default to the boards' spots) as S.layout.receivers.
+// points (IDs A/B/C, which default to the boards' spots) as S.layout.receivers, labelled with the cloud's point_names
+// (config/boards.json "name": Amazon Alexa, Smart Thermostat, Fridge).
 const POLL_MS = 250;       // room_viewer.POLL_S
 const VIEW_MARGIN_M = 1.5;
 const $ = (id) => document.getElementById(id);
@@ -66,7 +67,8 @@ async function tick() {
     if (view) {
       const S = snapshot(r);
       await view.setRoom(S.layout, scan);
-      view.update(S, colorFor, (id) => "Point " + id);
+      const names = r.point_names || {};
+      view.update(S, colorFor, (id) => names[id] || "Point " + id);
     }
   } catch (e) {
     badge({ status: "offline", people: [] });

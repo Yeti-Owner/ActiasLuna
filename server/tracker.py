@@ -168,6 +168,8 @@ class Tracker:
     def __init__(self, get_ctx: Callable[[], dict], boards: List[dict]):
         self.get_ctx = get_ctx
         self.labels = {str(b.get("base_mac", "")).lower(): b.get("label", "") for b in boards}
+        # Display names (config/boards.json "name", e.g. "Fridge"); the label (A/B/C) stays the ID on the wire.
+        self.names = {str(b.get("base_mac", "")).lower(): b.get("name", "") for b in boards}
         self.nodes: Dict[str, Node] = {}
         self.stations: Dict[str, dict] = {}
         self.sta_t = None
@@ -200,6 +202,9 @@ class Tracker:
 
     def label(self, nid: str) -> str:
         return self.labels.get(nid) or nid[-4:]
+
+    def name(self, nid: str) -> str:
+        return self.names.get(nid) or self.label(nid)
 
     def node_by_ifm(self) -> Dict[str, str]:
         return {n.ifm: n.id for n in self.nodes.values() if n.ifm}
@@ -242,7 +247,7 @@ class Tracker:
                 node.last_seq = seq
             elif not isinstance(up, int) or up + 2000 < node.up_ms:
                 node.reboots += 1
-                self._event(rt, f"receiver {self.label(node.id)} restarted")
+                self._event(rt, f"receiver {self.name(node.id)} restarted")
                 node.last_seq = seq
             else:
                 node.lost = max(0, node.lost - 1)
@@ -261,12 +266,12 @@ class Tracker:
         if node is None:
             node = self.nodes[nid] = Node(nid)
             node.first = rt
-            self._event(rt, f"receiver {self.label(nid)} online ({pkt.get('role')}, {src[0]})")
+            self._event(rt, f"receiver {self.name(nid)} online ({pkt.get('role')}, {src[0]})")
         node.role = pkt.get("role", node.role)
         node.ifm = pkt.get("ifm", node.ifm)
         node.ip = src[0]
         if node.last is not None and rt - node.last > NODE_OFFLINE_S:
-            self._event(rt, f"receiver {self.label(nid)} back after {rt - node.last:.0f}s gap")
+            self._event(rt, f"receiver {self.name(nid)} back after {rt - node.last:.0f}s gap")
         node.last = rt
         node.received += 1
         self._track_seq(node, pkt, rt)
@@ -718,7 +723,7 @@ class Tracker:
             span = min(RATE_S, max(0.5, t - n.first)) if n.first is not None else RATE_S
             expected = n.received + n.lost
             rows.append({
-                "id": n.id, "label": self.label(n.id), "role": n.role, "ip": n.ip, "fw": n.fw,
+                "id": n.id, "label": self.label(n.id), "name": self.name(n.id), "role": n.role, "ip": n.ip, "fw": n.fw,
                 "age": age, "status": status, "pkt_rate": round(len(n.pkt_times) / span, 2),
                 "frame_rate": round(sum(f[1] for f in n.frame_times) / span, 2),
                 "ctrl_rate": round(sum(f[2] for f in n.frame_times) / span, 2), "aprssi": n.aprssi,

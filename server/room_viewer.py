@@ -64,8 +64,8 @@ class Cloud:
         self.room = cfg.get("room")
         self.last_known = last_known
         self.lock = threading.Lock()
-        self.view = {"status": "connecting", "people": [], "points": {}, "last_report": None, "age_s": None,
-                     "stale_s": STALE_S, "last_known": last_known}
+        self.view = {"status": "connecting", "people": [], "points": {}, "point_names": {}, "last_report": None,
+                     "age_s": None, "stale_s": STALE_S, "last_known": last_known}
         self._history = None    # (fetched at, newest t, people) for --last-known
         self._status = (-1e18, {})   # (fetched at, /api/now answer)
         self._newest = None     # newest cloud timestamp seen; positions are fetched relative to it, so the two
@@ -101,6 +101,7 @@ class Cloud:
         else:
             state, people = ("stale" if last is not None else "no_data"), []
         view = {"status": state, "people": people, "points": recent.get("points") or {},
+                "point_names": recent.get("point_names") or {},
                 "last_report": last, "age_s": None if age is None else round(age, 1), "stale_s": STALE_S,
                 "last_known": self.last_known, "run": recent.get("run")}
         with self.lock:

@@ -8,9 +8,9 @@ ESP32 boards → luna_server (server/cloud_sync.py) ──HTTPS──► Vultr V
                                          FaceTime ⇄ Chert agent ───┘  "Did anyone come in?"
 ```
 
-**What gets uploaded:** four times a second while someone is in the room, their X/Y position in metres (the finger point while they trace on the phone map); events when someone **enters**, **stands by point A/B/C** (3+ s within 1 m), **moves on**, and **leaves**; and a room-count heartbeat every 10 s. People are pseudonyms such as `person-1` or `body`. **No MAC addresses, names or IPs.** Simulated crowd decoys are never uploaded. Positions are kept only for the current and previous run (`MOTH_POSITION_RUNS`, default 2, checked every 10 minutes) and never longer than 7 days; events and counts are kept 30 days.
+**What gets uploaded:** four times a second while someone is in the room, their X/Y position in metres (the finger point while they trace on the phone map); events when someone **enters**, **stands by the Amazon Alexa, Smart Thermostat or Fridge** (points A/B/C; 3+ s within 1 m), **moves on**, and **leaves**; and a room-count heartbeat every 10 s. People are pseudonyms such as `person-1` or `body`. **No MAC addresses, names or IPs.** Simulated crowd decoys are never uploaded. Positions are kept only for the current and previous run (`MOTH_POSITION_RUNS`, default 2, checked every 10 minutes) and never longer than 7 days; events and counts are kept 30 days.
 
-The points default to the boards' positions and labels (A, B, C). To use other spots, add `"points": {"A": [x, y], ...}` in metres to `config/cloud.json`.
+The points default to the boards' positions and labels (A, B, C), and are spoken by the boards' `name` in `config/boards.json`: A = Amazon Alexa, B = Smart Thermostat, C = Fridge (uploaded as `point_names`; an unnamed point is said as "point A"). To use other spots, add `"points": {"A": [x, y], ...}` in metres to `config/cloud.json`, and `"point_names": {"A": "...", ...}` to rename them.
 
 ## Day to day
 With `config/cloud.json` filled in, uploading is automatic:
@@ -44,9 +44,9 @@ All need `Authorization: Bearer <QUERY token>`. Each returns JSON plus an `answe
 
 | Ask | Call | Example answer |
 |---|---|---|
-| "Did anyone come in?" | `GET /api/recent?minutes=10` | Someone entered 30 seconds ago, stood by point A for 10 seconds, then wandered to point B and stood there for 5 seconds, then left just now. |
-| "Where are they?" | `GET /api/where` | There's 1 person in the room: they're standing by point B (for 20 seconds so far). |
-| "Is anyone there?" | `GET /api/now` | Yes. There is 1 person in the room right now, mostly near point B. It's been occupied for 2 minutes. |
+| "Did anyone come in?" | `GET /api/recent?minutes=10` | Someone entered 30 seconds ago, stood by the Amazon Alexa for 10 seconds, then wandered to the Smart Thermostat and stood there for 5 seconds, then left just now. |
+| "Where are they?" | `GET /api/where` | There's 1 person in the room: they're standing by the Smart Thermostat (for 20 seconds so far). |
+| "Is anyone there?" | `GET /api/now` | Yes. There is 1 person in the room right now, mostly near the Smart Thermostat. It's been occupied for 2 minutes. |
 | "When today?" | `GET /api/summary?date=2026-11-14` | On Saturday, November 14, people were in the room 2 times: ... |
 | "Between 2 and 5 PM?" | `GET /api/events?from=2026-11-14T14:00&to=2026-11-14T17:00` | per-visit story, plus raw `events` |
 | raw track | `GET /api/positions?from=&to=&pid=` | `positions: [{t, pid, x, y}]`, `points` |

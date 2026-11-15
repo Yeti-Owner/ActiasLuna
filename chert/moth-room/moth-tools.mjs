@@ -29,8 +29,9 @@ export async function askRoom(path, params = {}, env = process.env) {
 export const tools = [
   llm.tool({
     name: 'recent_activity',
-    description: 'What happened in the room in the last few minutes: who entered, which point (A, B, C) they stood ' +
-      'by and for how long, where they wandered, and when they left. Use for "anyone come in?", "what just happened?".',
+    description: 'What happened in the room in the last few minutes: who entered, which spot (the Amazon Alexa, the ' +
+      'Smart Thermostat or the Fridge) they stood by and for how long, where they wandered, and when they left. ' +
+      'Use for "anyone come in?", "what just happened?".',
     parameters: z.object({
       minutes: z.number().describe('How far back to look, in minutes. Default 10; use 60 for "the last hour".'),
     }),
@@ -38,7 +39,8 @@ export const tools = [
   }),
   llm.tool({
     name: 'where_now',
-    description: 'Where each person in the room is right now: standing by a point, or which point they are closest to.',
+    description: 'Where each person in the room is right now: standing by the Amazon Alexa, the Smart Thermostat or ' +
+      'the Fridge, or which of them they are closest to.',
     execute: async () => askRoom('/api/where'),
   }),
   llm.tool({
@@ -57,7 +59,7 @@ export const tools = [
   llm.tool({
     name: 'room_history_between',
     description: 'What happened in the room between two times, e.g. "between 2 and 5 PM" or "last night": ' +
-      'entries, stops at points, and exits.',
+      'entries, stops by the Amazon Alexa, Smart Thermostat or Fridge, and exits.',
     parameters: z.object({
       from: z.string().describe('Start, ISO local time like 2026-11-14T14:00'),
       to: z.string().describe('End, ISO local time like 2026-11-14T17:00'),
@@ -76,18 +78,20 @@ export function instructionsFor(today, tz = TZ) {
   return `You are Actias, an AI that watches over one room using Wi-Fi sensors, speaking over FaceTime.
 If asked your name, you are Actias.
 Today is ${today} (timezone ${tz}). Work out dates like "yesterday" from that.
-The room has marked points called A, B and C. People are described as "someone"; you never know who they are.
+The room has three marked spots: the Amazon Alexa, the Smart Thermostat and the Fridge. Always call them by those
+names, never "point A", "B" or "C" (the tools' JSON uses A = Amazon Alexa, B = Smart Thermostat, C = Fridge as IDs).
+People are described as "someone"; you never know who they are.
 When the caller asks about the room, ALWAYS call a tool first; never guess:
 - "Did anyone come in?", "What just happened?", "Anything in the last N minutes?" -> recent_activity.
-- "Where are they?", "Is someone by point B?" -> where_now.
+- "Where are they?", "Is someone by the thermostat?", "Anyone at the fridge?" -> where_now.
 - "Is anyone there?" -> room_status_now (then recent_activity if they want detail).
 - A day or a time range -> room_history_for_day or room_history_between.
 Speak the tool's "answer" naturally and briefly, keeping its times ("30 seconds ago", "at 3:05 PM") as given.
 Be honest about limits:
 - You know how many people there were and where they stood, never WHO they were. If asked who, say so.
 - If a tool says the sensors weren't reporting, say you weren't watching then. Never turn that into "nobody was there".
-- Boards A, B and C are the sensors at those points. If a tool says a board went offline (it was unplugged or lost
-  power), keep that in the story where it happened, and mention when one is still offline.
+- There is a sensor by the Amazon Alexa, the Smart Thermostat and the Fridge. If a tool says one went offline (it was
+  unplugged or lost power), keep that in the story where it happened, and mention when one is still offline.
 - If the history service is unreachable, say so plainly.
 Keep every reply to one to three short sentences, and be clear that you are an AI.`;
 }

@@ -1,6 +1,6 @@
 # Actias FaceTime agent (Chert)
 
-FaceTime the room and ask about it: *"Did anyone come in?"*, *"Where are they?"*, *"Was anyone here today?"* The agent answers out loud from the room history on Vultr (`../cloud/`), using a **read-only** QUERY token. For example: *"Someone entered 30 seconds ago, stood by point A for 10 seconds, then wandered to point B, then left."*
+FaceTime the room and ask about it: *"Did anyone come in?"*, *"Where are they?"*, *"Was anyone here today?"* The agent answers out loud from the room history on Vultr (`../cloud/`), using a **read-only** QUERY token. For example: *"Someone entered 30 seconds ago, stood by the Amazon Alexa for 10 seconds, then wandered to the Smart Thermostat, then left."*
 
 ## Setup (once)
 Needs **Node 24** (nodejs.org) and a filled-in `config\cloud.json` (see `../cloud/README.md`). From the repo root:

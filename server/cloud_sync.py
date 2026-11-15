@@ -1,4 +1,5 @@
-"""Room activity -> Moth cloud (cloud/moth_cloud.py on Vultr): live X/Y, entered / left, and stops at points A, B, C.
+"""Room activity -> Moth cloud (cloud/moth_cloud.py on Vultr): live X/Y, entered / left, and stops at points A, B, C
+(spoken by their config/boards.json names: Amazon Alexa, Smart Thermostat, Fridge).
 
 App.cloud_loop runs Observer.step at OBSERVE_S under App.lock; Uploader posts from its own thread so a slow network
 never holds the lock. Config is config/cloud.json ({url, ingest_token, room, optional points}); without it sync is off.
@@ -12,7 +13,8 @@ Each luna_server start is one run (App.start_cloud names it); every item carries
 earlier run still upload under that run, and the cloud answers only about the latest run by default.
 
 Wire format (POST /ingest, metres, epoch seconds; moth_cloud.Store validates it):
-  {"room", "points": {"A": [x, y]}, "samples": [{t, in, nearby, zones}], "positions": [{t, pid, x, y}],
+  {"room", "points": {"A": [x, y]}, "point_names": {"A": "Amazon Alexa"}, "samples": [{t, in, nearby, zones}],
+   "positions": [{t, pid, x, y}],
    "events": [{t, pid, kind: enter|leave|arrive|depart, point?, dur?, x?, y?}]}   each item also has "run"
 Board health rides in "events" too: {t, pid: "board", kind: board_offline|board_online, point: <board label>}, sent
 only on a change after the board was heard in this run, stamped with when it was last / first heard again.
@@ -221,6 +223,14 @@ def _near_box(x: float, y: float, poly, margin: float) -> bool:
     return min(xs) - margin <= x <= max(xs) + margin and min(ys) - margin <= y <= max(ys) + margin
 
 
+def point_names(boards: list, override=None) -> dict:
+    """Point ID -> spoken/display name ("A" -> "Amazon Alexa"): config/cloud.json "point_names" if given, else
+    config/boards.json "name" by label. moth_cloud says "the <name>"; unnamed points stay "point <ID>"."""
+    if override:
+        return {str(k): str(v) for k, v in override.items()}
+    return {str(b["label"]): str(b["name"]) for b in boards if b.get("label") and b.get("name")}
+
+
 def points_from(layout: dict, label, override=None) -> dict:
     """Named points people stand by: config/cloud.json "points" if given, else the boards (A, B, C)."""
     if override:
@@ -293,6 +303,7 @@ class Uploader:
         self.spool = spool
         self.log = log
         self.points: dict = {}
+        self.point_names: dict = {}
         self.backoff = 5.0
         self.warned_old = False
         self.state = "starting"
@@ -300,6 +311,8 @@ class Uploader:
     def post(self, batch: list, timeout=8.0) -> dict:
         body = {"room": self.cfg["room"], "samples": [], "positions": [], "events": [],
                 "points": {k: [round(v[0], 3), round(v[1], 3)] for k, v in self.points.items()}}
+        if self.point_names:
+            body["point_names"] = self.point_names
         keys = {"s": "samples", "p": "positions", "e": "events"}
         for row in batch:
             for k, v in row.items():

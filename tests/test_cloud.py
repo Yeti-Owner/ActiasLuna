@@ -153,6 +153,37 @@ class ApiTests(unittest.TestCase):
         path.unlink()
         os.rmdir(spool_dir)
 
+    def test_point_names_are_spoken(self):
+        boards = [{"label": "A", "name": "Amazon Alexa"}, {"label": "B", "name": "Smart Thermostat"}, {"label": "C"}]
+        names = cs.point_names(boards)
+        self.assertEqual(names, {"A": "Amazon Alexa", "B": "Smart Thermostat"})     # unnamed C stays "point C"
+        now = time.time()
+        code, _ = self.call("/ingest", token=INGEST, body={
+            "room": "lab", "run": "r1", "points": {"A": [0, 0], "B": [3, 0], "C": [0, 3]}, "point_names": names,
+            "samples": [{"t": now - 1, "in": 1, "zones": {"B": 1}}],
+            "positions": [{"t": now - 1, "pid": "person-1", "x": 2.9, "y": 0.1}],
+            "events": [{"t": now - 40, "pid": "person-1", "kind": "enter"},
+                       {"t": now - 35, "pid": "person-1", "kind": "arrive", "point": "A"},
+                       {"t": now - 25, "pid": "person-1", "kind": "depart", "point": "A", "dur": 10},
+                       {"t": now - 20, "pid": "person-1", "kind": "arrive", "point": "C"},
+                       {"t": now - 15, "pid": "person-1", "kind": "depart", "point": "C", "dur": 5},
+                       {"t": now - 10, "pid": "person-1", "kind": "arrive", "point": "B"}]})
+        self.assertEqual(code, 200)
+        _, recent = self.call("/api/recent?room=lab&minutes=5")
+        self.assertIn("stood by the Amazon Alexa for 10 seconds", recent["answer"])
+        self.assertIn("then wandered to point C", recent["answer"])
+        self.assertIn("the Smart Thermostat, where they are now", recent["answer"])
+        self.assertEqual(recent["visits"][0]["stops"][0]["point"], "A")            # IDs unchanged on the wire
+        _, now_out = self.call("/api/now?room=lab")
+        self.assertIn("mostly near the Smart Thermostat", now_out["answer"])
+        _, where = self.call("/api/where?room=lab")
+        self.assertIn("standing by the Smart Thermostat", where["answer"])
+        self.assertEqual(where["point_names"]["A"], "Amazon Alexa")
+        _, pos = self.call("/api/positions?room=lab")
+        self.assertEqual(pos["point_names"]["B"], "Smart Thermostat")
+        bad = {"room": "lab", "point_names": {"A": "<script>"}}
+        self.assertEqual(self.call("/ingest", token=INGEST, body=bad)[0], 400)
+
 
 class ObserverTests(unittest.TestCase):
     POINTS = {"A": (0.0, 0.0), "B": (3.0, 0.0)}
