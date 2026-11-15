@@ -56,6 +56,7 @@ MAX_COORD_M = 1000.0
 WHERE_FRESH_S = 10.0        # a position older than this is not "right now"
 LOOKBACK_S = 6 * 3600       # how far back to look for the start of a visit still running at the window's start
 MAX_VISITS_SPOKEN = 5
+PRUNE_EVERY_S = 600         # a new run's predecessor-but-one loses its positions within this long
 ROOM_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 ZONE_RE = re.compile(r"^[A-Za-z0-9_. -]{1,32}$")
 PID_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
@@ -268,12 +269,21 @@ class Store:
         with self.lock:
             self.db.close()
 
-    def prune(self, days, position_days=None):
+    def prune(self, days, position_days=None, position_runs=None):
+        """Drop rows older than the retention days. With position_runs, raw X/Y also only survives for that many
+        newest runs per room (events and counts keep their full history for the agent)."""
         now = time.time()
+        keep = {}
+        if position_runs:
+            keep = {room: [r for r, _, _ in self.runs(room)][:position_runs] for room in self.rooms()}
         with self.lock:
             self.db.execute("DELETE FROM samples WHERE t < ?", (now - days * 86400,))
             self.db.execute("DELETE FROM events WHERE t < ?", (now - days * 86400,))
             self.db.execute("DELETE FROM positions WHERE t < ?", (now - (position_days or days) * 86400,))
+            for room, runs in keep.items():
+                if runs:     # a room with no run IDs yet keeps its positions rather than losing all of them
+                    self.db.execute(f"DELETE FROM positions WHERE room = ? AND run NOT IN "
+                                    f"({','.join('?' * len(runs))})", [room] + runs)
             self.db.commit()
 
 
@@ -723,6 +733,8 @@ def main():
     ap.add_argument("--retention-days", type=float, default=float(os.environ.get("MOTH_RETENTION_DAYS", 30)))
     ap.add_argument("--position-days", type=float, default=float(os.environ.get("MOTH_POSITION_DAYS", 7)),
                     help="raw X/Y tracks are kept this long (events and counts keep --retention-days)")
+    ap.add_argument("--position-runs", type=int, default=int(os.environ.get("MOTH_POSITION_RUNS", 2)),
+                    help="raw X/Y tracks are kept only for this many newest runs (0 = no limit)")
     args = ap.parse_args()
     ingest, query = os.environ.get("MOTH_INGEST_TOKEN", ""), os.environ.get("MOTH_QUERY_TOKEN", "")
     if len(ingest) < 16 or len(query) < 16 or ingest == query:
@@ -735,13 +747,13 @@ def main():
 
     def pruner():
         while True:
-            store.prune(args.retention_days, args.position_days)
-            time.sleep(3600)
+            store.prune(args.retention_days, args.position_days, args.position_runs)
+            time.sleep(PRUNE_EVERY_S)
     threading.Thread(target=pruner, daemon=True).start()
 
     server = make_server(args.host, args.port, store, ingest, query, args.tz, args.room)
     print(f"Moth cloud on {args.host}:{args.port}  db={args.db}  tz={args.tz}  retention={args.retention_days}d "
-          f"positions={args.position_days}d", flush=True)
+          f"positions={args.position_days}d/{args.position_runs or 'all'} runs", flush=True)
     server.serve_forever()
 
 

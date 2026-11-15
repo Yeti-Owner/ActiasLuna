@@ -48,6 +48,19 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(st.latest("r")[3], {"B": 1})        # junk zone name dropped
         st.close()
 
+    def test_positions_kept_for_newest_runs_only(self):
+        st, now = mc.Store(":memory:"), time.time()
+        for i, run in enumerate(("run-a", "run-b", "run-c")):
+            t = now - 300 + i * 100
+            st.add("r", [{"t": t, "in": 1}], run)
+            st.add_positions("r", [{"t": t, "pid": "person-1", "x": 1, "y": 1}], run)
+            st.add_events("r", [{"t": t, "pid": "person-1", "kind": "enter"}], run)
+        st.prune(30, 7, position_runs=2)
+        self.assertEqual(len(st.positions("r", 0, now + 1, run="run-a")), 0)
+        self.assertEqual(len(st.positions("r", 0, now + 1, run=None)), 2)
+        self.assertEqual(len(st.events("r", 0, now + 1, None)), 3)   # history for the agent stays
+        st.close()
+
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
@@ -187,6 +200,26 @@ class ObserverTests(unittest.TestCase):
         self.assertEqual(nearby, 1)                         # heard but outside the room
         self.assertFalse(watching)
         self.assertNotIn("aabb", json.dumps(seen))
+
+    def test_fresh_trace_is_sent_as_the_position(self):
+        class Ph:
+            raw, est, last = {"x": 1.0, "y": 1.0}, {"kind": "estimated"}, 100.0
+            trace = [(99.0, 2.0, 2.5), (100.5, 3.0, 2.0)]
+
+        class Live:
+            phones = {"aabbccddeeff": Ph()}
+            body, nodes = None, {}
+
+        layout = {"polygon": [[0, 0], [4, 0], [4, 3], [0, 3]], "receivers": {}}
+        obs = cs.Observer()
+        self.assertEqual(cs.sightings(Live, layout, obs, 101.0)[0], {"person-1": (3.0, 2.0)})
+        self.assertEqual(cs.sightings(Live, layout, obs, 103.0)[0], {"person-1": (1.0, 1.0)})   # finger lifted
+        Ph.est = {"kind": "stale"}
+        self.assertEqual(cs.sightings(Live, layout, obs, 101.0)[0], {"person-1": (3.0, 2.0)})   # trace alone counts
+        Ph.trace = [(100.5, 4.6, 2.0)]                       # traced just past the wall still counts
+        self.assertEqual(cs.sightings(Live, layout, obs, 101.0)[0], {"person-1": (4.6, 2.0)})
+        Ph.trace = [(100.5, 9.0, 2.0)]
+        self.assertEqual(cs.sightings(Live, layout, obs, 101.0)[0], {})
 
 
 class NarrativeTests(unittest.TestCase):

@@ -5,7 +5,8 @@ never holds the lock. Config is config/cloud.json ({url, ingest_token, room, opt
 
 Who is reported: phones the tracker follows (already consent-gated by the AP station list in Tracker._obs) and the
 device-free body, each as a per-run pseudonym ("person-1", "body"). No MAC, name or IP leaves the laptop. Decoys
-live in App.decoys and never get here. Positions are Phone.raw, never the jammed or smoothed display dot.
+live in App.decoys and never get here. Positions are Phone.raw, never the jammed or smoothed display dot, except
+while the holder traces on the phone map: then the finger point is sent instead, as an ordinary position.
 
 Each luna_server start is one run (App.start_cloud names it); every item carries its run, so spooled items from an
 earlier run still upload under that run, and the cloud answers only about the latest run by default.
@@ -28,8 +29,8 @@ from typing import Dict, Optional
 
 import radiomap as rmap
 
-OBSERVE_S = 1.0
-POSITION_S = 1.0
+OBSERVE_S = 0.25
+POSITION_S = 0.25           # 4 positions/s per person: the frontend's live room follows within about a second
 # Heartbeat: must stay well under moth_cloud.MAX_GAP_S (90 s) or the cloud reports "not reporting".
 SAMPLE_S = 10.0
 NODE_FRESH_S = 10.0          # no board heard for this long = not watching; send nothing rather than "empty"
@@ -41,7 +42,12 @@ POINT_EXIT_M = 1.4           # hysteresis against estimate jitter at the edge of
 POINT_STAY_S = 3.0           # near a point this long = "stood by it"
 POINT_EXIT_S = 1.5
 DEDUPE_BODY_M = 1.0          # a body estimate this close to a phone is that phone's holder
-FLUSH_S = 2.0
+# A trace point this fresh replaces the phone's estimate (matches app.js SNAP_FRESH_S; phone.js posts every 250 ms).
+TRACE_FRESH_S = 1.0
+# A traced point may sit this far outside the room's bounding box and still count as inside (phone.js lets the
+# finger go TRACE_MARGIN_M past the outline); estimates must be inside the polygon.
+TRACE_MARGIN_M = 1.0
+FLUSH_S = 0.5
 BATCH = 2000
 SPOOL_MAX = 200_000
 
@@ -157,9 +163,16 @@ def sightings(live, layout: dict, observer: Observer, t: float):
     seen, nearby = {}, 0
     for mac, ph in live.phones.items():
         est = ph.est or {}
-        if ph.raw and est.get("kind") not in (None, "stale"):
-            x, y = ph.raw["x"], ph.raw["y"]
-            if rmap.point_in_poly(x, y, poly):
+        trace = getattr(ph, "trace", None)
+        xy, traced = None, False
+        # Trace points are stamped in wall time (luna_server._phone_trace), the same clock as t.
+        if trace and t - trace[-1][0] <= TRACE_FRESH_S:
+            xy, traced = (trace[-1][1], trace[-1][2]), True
+        elif ph.raw and est.get("kind") not in (None, "stale"):
+            xy = ph.raw["x"], ph.raw["y"]
+        if xy:
+            x, y = xy
+            if rmap.point_in_poly(x, y, poly) or (traced and _near_box(x, y, poly, TRACE_MARGIN_M)):
                 seen[observer.pid(mac)] = (x, y)
                 continue
         if ph.last is not None and t - ph.last <= NEARBY_S:
@@ -171,6 +184,11 @@ def sightings(live, layout: dict, observer: Observer, t: float):
             seen["body"] = (bx, by)
     watching = any(n.last is not None and t - n.last <= NODE_FRESH_S for n in live.nodes.values())
     return seen, nearby, watching
+
+
+def _near_box(x: float, y: float, poly, margin: float) -> bool:
+    xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+    return min(xs) - margin <= x <= max(xs) + margin and min(ys) - margin <= y <= max(ys) + margin
 
 
 def points_from(layout: dict, label, override=None) -> dict:

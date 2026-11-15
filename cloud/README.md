@@ -8,7 +8,7 @@ ESP32 boards → luna_server (server/cloud_sync.py) ──HTTPS──► Vultr V
                                          FaceTime ⇄ Chert agent ───┘  "Did anyone come in?"
 ```
 
-**What gets uploaded:** about once a second while someone is in the room, their X/Y position in metres; events when someone **enters**, **stands by point A/B/C** (3+ s within 1 m), **moves on**, and **leaves**; and a room-count heartbeat every 10 s. People are pseudonyms such as `person-1` or `body`. **No MAC addresses, names or IPs.** Simulated crowd decoys are never uploaded. Positions are deleted after 7 days, everything else after 30.
+**What gets uploaded:** four times a second while someone is in the room, their X/Y position in metres (the finger point while they trace on the phone map); events when someone **enters**, **stands by point A/B/C** (3+ s within 1 m), **moves on**, and **leaves**; and a room-count heartbeat every 10 s. People are pseudonyms such as `person-1` or `body`. **No MAC addresses, names or IPs.** Simulated crowd decoys are never uploaded. Positions are kept only for the current and previous run (`MOTH_POSITION_RUNS`, default 2, checked every 10 minutes) and never longer than 7 days; events and counts are kept 30 days.
 
 The points default to the boards' positions and labels (A, B, C). To use other spots, add `"points": {"A": [x, y], ...}` in metres to `config/cloud.json`.
 

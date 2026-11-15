@@ -25,11 +25,12 @@ WEB = ROOT / "web" / "static"
 DATA = ROOT / "data"
 CFG = ROOT / "config" / "cloud.json"
 
-POLL_S = 1.0
+POLL_S = 0.25              # matches cloud_sync.POSITION_S on the backend
+STATUS_EVERY_S = 2.0       # /api/now (the heartbeat that says the backend is up) changes slowly
 STALE_S = 300.0            # no upload from the backend laptop for this long = draw nobody
-PERSON_FRESH_S = 10.0      # a person is in the room if seen within this of the newest upload (moth_cloud.WHERE_FRESH_S)
-TRAIL_S = 20.0
-LIVE_WINDOW_S = 60.0       # positions fetched each poll while live; covers PERSON_FRESH_S + TRAIL_S plus clock skew
+PERSON_FRESH_S = 3.0       # a person is in the room if seen within this of the newest upload
+TRAIL_S = 10.0
+FIRST_WINDOW_S = 120.0     # positions window before any cloud timestamp is known (covers clock skew)
 LAST_KNOWN_EVERY_S = 30.0  # the full-history fetch for --last-known is heavier, so it refreshes slowly
 TIMEOUT_S = 8.0
 
@@ -65,7 +66,10 @@ class Cloud:
         self.lock = threading.Lock()
         self.view = {"status": "connecting", "people": [], "points": {}, "last_report": None, "age_s": None,
                      "stale_s": STALE_S, "last_known": last_known}
-        self._history = None    # (fetched at, people) for --last-known
+        self._history = None    # (fetched at, newest t, people) for --last-known
+        self._status = (-1e18, {})   # (fetched at, /api/now answer)
+        self._newest = None     # newest cloud timestamp seen; positions are fetched relative to it, so the two
+                                # laptops' clocks never need to agree
 
     def _get(self, path, **q):
         if self.room:
@@ -77,11 +81,16 @@ class Cloud:
 
     def poll(self):
         now = time.time()
-        status = self._get("/api/now")
-        recent = self._get("/api/positions", **{"from": now - LIVE_WINDOW_S, "to": now + LIVE_WINDOW_S})
+        if now - self._status[0] >= STATUS_EVERY_S:
+            self._status = (now, self._get("/api/now"))
+        status = self._status[1]
+        since = now - FIRST_WINDOW_S if self._newest is None else self._newest - TRAIL_S - PERSON_FRESH_S
+        recent = self._get("/api/positions", **{"from": since, "to": max(now, self._newest or now) + 86400})
         pos = recent.get("positions") or []
         stamps = [t for t in (status.get("last_report"), pos[-1]["t"] if pos else None) if t is not None]
         last = max(stamps) if stamps else None
+        if last is not None:
+            self._newest = max(last, self._newest or last)
         if last is None and self.last_known:
             last = self._history_people(now)[0]
         age = None if last is None else max(0.0, now - last)
@@ -100,7 +109,7 @@ class Cloud:
     def _history_people(self, now):
         """(newest position t, people at that moment) from the latest run; refetched every LAST_KNOWN_EVERY_S."""
         if self._history is None or now - self._history[0] > LAST_KNOWN_EVERY_S:
-            pos = self._get("/api/positions", **{"from": 1, "to": now + LIVE_WINDOW_S}).get("positions") or []
+            pos = self._get("/api/positions", **{"from": 1, "to": now + 86400}).get("positions") or []
             newest = pos[-1]["t"] if pos else None
             self._history = (now, newest, people_from(pos, newest, "stale") if pos else [])
         return self._history[1], self._history[2]

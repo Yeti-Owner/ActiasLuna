@@ -1,7 +1,8 @@
 // 3D room on the frontend laptop, fed by server/room_viewer.py's /api/cloud/room (people from Vultr, no boards).
 // view3d.update() takes the dashboard snapshot shape, so the cloud people are dressed as S.phones and the cloud's
 // points (A/B/C, which default to the boards' spots) as S.layout.receivers.
-const POLL_MS = 1000;
+const POLL_MS = 250;       // room_viewer.POLL_S
+const VIEW_MARGIN_M = 1.5;
 const $ = (id) => document.getElementById(id);
 const DEFAULT_POLYGON = [[0, 0], [4, 0], [4, 4], [0, 4]];
 
@@ -41,11 +42,20 @@ function snapshot(r) {
     receivers[id] = { x, y };
     nodes.push({ id, status: r.status === "live" ? "online" : "stale" });
   }
-  const phones = r.people.map((p) => ({
-    mac: p.pid,
-    est: { x: p.x, y: p.y, unc: 0.35, kind: p.kind },
-    trail: p.trail.map(([t, x, y]) => [t, x, y, 0.35, "estimated"]),
-  }));
+  // Positions can sit on furniture or past the walls (traced points may go TRACE_MARGIN_M outside); view3d draws
+  // floor marks and labels through the scan. Only a wild value is pulled in, so nobody is drawn off-screen.
+  const xs = layout.polygon.map((q) => q[0]), ys = layout.polygon.map((q) => q[1]);
+  const clamp = (v, lo, hi) => Math.min(hi + VIEW_MARGIN_M, Math.max(lo - VIEW_MARGIN_M, v));
+  const place = (x, y) => [clamp(x, Math.min(...xs), Math.max(...xs)), clamp(y, Math.min(...ys), Math.max(...ys))];
+  const phones = r.people.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)).map((p) => {
+    const [x, y] = place(p.x, p.y);
+    return {
+      mac: p.pid,
+      est: { x, y, unc: 0.35, kind: p.kind },
+      trail: p.trail.filter(([, tx, ty]) => Number.isFinite(tx) && Number.isFinite(ty))
+        .map(([t, tx, ty]) => [t, ...place(tx, ty), 0.35, "estimated"]),
+    };
+  });
   return { layout: { polygon: layout.polygon, receivers }, nodes, phones };
 }
 
