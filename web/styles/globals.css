@@ -1,6 +1,94 @@
 @import "tailwindcss";
 @import "./fonts.css";
 
+.call-walkthrough { padding: 0 0 8px; text-align: center; }
+.call-section-heading > span { color: #d7e9b5; font: 11px "Geist Sans", sans-serif; letter-spacing: .2em; text-transform: uppercase; }
+.call-section-heading h3 { margin: 12px 0 8px; font-size: clamp(26px, 3.5vw, 38px); line-height: 1.2; letter-spacing: -.04em; }
+.call-section-heading > p { margin: 0; color: #d6e0ce99; font-size: 12px; }
+.phone-carousel { margin-top: 32px; }
+.phone-carousel-stage { position: relative; height: 510px; overflow: hidden; isolation: isolate; mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent); }
+.call-phone-position { position: absolute; top: 4px; left: calc(50% - 122px); width: 244px; height: 496px; transform-origin: center center; }
+.call-phone-frame { height: 100%; padding: 7px; border: 1px solid #8e9688; border-radius: 41px; background: linear-gradient(130deg, #7a8176, #111511 14%, #383d35 50%, #131812 85%, #717969); box-shadow: 0 24px 50px #00180955, 0 0 0 1px #0e150d; }
+.call-screen { position: relative; display: flex; flex-direction: column; align-items: center; height: 100%; padding: 0 17px 25px; overflow: hidden; border-radius: 34px; background: radial-gradient(ellipse at 50% 14%, #596f50 0, #2d4437 38%, #142a23 80%); color: #f4f5e9; font-family: "Geist Sans", sans-serif; text-shadow: none; }
+.call-status { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 42px; flex: 0 0 42px; font-size: 10px; font-weight: 600; }
+.call-status > span:last-child { display: flex; align-items: center; gap: 3px; }
+.call-island { position: absolute; top: 10px; left: calc(50% - 35px); width: 70px; height: 19px; border-radius: 20px; background: #080d09; }
+.call-provider { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 10px; color: #e5eddfb3; margin: 6px 0 16px; }
+.call-provider img { width: 17px; height: 17px; object-fit: contain; }
+.call-provider > span { color: #e5eddf66; }
+.call-avatar { display: grid; place-items: center; width: 65px; height: 65px; flex: 0 0 65px; border: 1px solid #e1efbc33; background: #d6edb00d; border-radius: 50%; box-shadow: 0 0 28px #cae5a40c; }
+.call-avatar svg { width: 49px; height: 49px; }
+.call-avatar.is-ringing { animation: call-ring 3s ease-out infinite; }
+.call-screen h4 { margin: 12px 0 4px; font-size: 21px; font-weight: 500; letter-spacing: -.6px; }
+.call-connection { margin: 0; font-size: 10px; color: #d5e2ce99; display: flex; align-items: center; gap: 5px; }
+.call-connection > span { width: 4px; height: 4px; border-radius: 50%; background: #b7dfa1; }
+.call-conversation { width: 100%; flex: 1; padding-top: 26px; }
+.call-transcript-label { display: flex; align-items: center; gap: 5px; color: #d4dfc987; font-size: 9px; margin-bottom: 9px; }
+.call-transcript { border: 1px solid #e3efd51f; border-radius: 13px 13px 13px 3px; padding: 12px; background: #ebf3df0c; }
+.call-transcript > span { display: block; color: #c5daa7; font-size: 9px; font-weight: 500; margin-bottom: 6px; }
+.call-transcript > p { margin: 0; font-size: 14px; line-height: 1.5; letter-spacing: -.2px; }
+.call-transcript.from-caller { border-radius: 13px 13px 3px 13px; background: #d9e8c9; color: #213b2c; }
+.call-transcript.from-caller > span { color: #536e48; }
+.call-actions { display: flex; justify-content: space-around; align-items: center; width: 100%; margin-top: 12px; }
+.call-actions > div { position: relative; display: grid; place-items: center; width: 39px; height: 39px; border-radius: 50%; background: #eef4e515; }
+.call-actions small { position: absolute; top: 45px; font-size: 8px; color: #dce5d5a6; }
+.call-actions > .call-hangup { width: 44px; height: 44px; background: #bd5148; box-shadow: 0 4px 12px #07190e33; }
+.call-home-indicator { position: absolute; bottom: 7px; left: calc(50% - 38px); height: 3px; width: 76px; background: #e9f0e0b3; border-radius: 5px; }
+.call-dialing { text-align: center; color: #d2e3bb; padding-top: 8px; }
+.call-dialing > svg { margin: 0 auto; opacity: .7; }
+.call-dialing p { font-size: 12px; line-height: 1.7; margin-top: 18px; color: #d9e4ce99; }
+.call-wave { height: 25px; display: flex; gap: 4px; align-items: center; justify-content: center; margin-top: 15px; }
+.call-wave i { width: 3px; height: 8px; border-radius: 4px; background: #c9dda8; animation: call-wave 1.5s ease-in-out infinite; }
+.call-listening { display: flex; gap: 3px; align-items: center; margin: 15px 0 0 4px; font-size: 9px; color: #d4dfc987; }
+.call-listening span { width: 3px; height: 3px; border-radius: 50%; background: #c5daa7; }
+.call-listening span:last-of-type { margin-right: 4px; }
+.call-room-summary { margin-top: 10px; padding: 10px; border: 1px solid #c5daa728; border-radius: 10px; background: #061d1630; }
+.call-room-summary > span { display: flex; align-items: center; gap: 4px; font-size: 8px; color: #bcd39e; }
+.call-room-summary > div { display: flex; align-items: center; gap: 5px; font-size: 9px; margin-top: 8px; }
+.call-room-summary i { width: 4px; height: 4px; border-radius: 50%; background: #c5daa7; }
+.call-room-summary strong { margin-left: auto; font-weight: 500; }
+.call-room-summary > p { margin: 7px 0 0; color: #c9d8bf80; font-size: 8px; }
+.call-screen-3 .call-conversation { padding-top: 15px; }
+.call-screen-3 .call-transcript { padding: 10px; }
+.call-screen-3 .call-transcript > p { font-size: 13px; }
+.call-carousel-caption { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 15px; font-size: 15px; }
+.call-stage-number { color: #c9d9ba80; font: 10px "Geist Sans", sans-serif; letter-spacing: .05em; }
+.call-carousel-controls { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 16px; }
+.call-carousel-controls > button { width: 36px; height: 36px; border-radius: 50%; border: 1px solid #d5e5bd33; background: #1530224d; display: grid; place-items: center; color: #e1edce; cursor: pointer; transition: background .2s; }
+.call-carousel-controls > button:hover { background: #c5daa726; }
+.call-carousel-controls button:focus-visible { outline: 2px solid #e1edce; outline-offset: 4px; }
+.call-carousel-controls button:disabled { opacity: .4; cursor: default; }
+.call-carousel-dots { display: flex; }
+.call-carousel-dots button { width: 23px; height: 36px; display: grid; place-items: center; cursor: pointer; }
+.call-carousel-dots span { width: 5px; height: 5px; background: #c5daa74d; border-radius: 5px; transition: width .3s, background .3s; }
+.call-carousel-dots .is-active { width: 16px; background: #d4e6b9; }
+@keyframes call-ring { 0% { box-shadow: 0 0 0 0 #d6edb025; } 100% { box-shadow: 0 0 0 18px #d6edb000; } }
+@keyframes call-wave { 50% { height: 22px; opacity: .5; } }
+@media (max-width: 520px) { .phone-carousel-stage { mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent); } .call-section-heading h3 { font-size: 26px; } }
+@media (prefers-reduced-motion: reduce) { .call-avatar.is-ringing, .call-wave i { animation: none; } .call-carousel-dots span { transition: none; } }
+
+.site-background {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(165deg, #fffde1, #c7f464 28%, #3e8e41 57%, #0d1b0f);
+}
+
+.site-background-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(8, 28, 15, .22), rgba(8, 28, 15, .48) 42%, rgba(6, 22, 12, .7));
+}
+
+.site-shell > section {
+  text-shadow: 0 1px 16px rgba(0, 20, 8, .3);
+}
+
+.site-shell .mth-root canvas {
+  filter: drop-shadow(0 2px 5px rgba(6, 35, 14, .55));
+}
+
 @theme {
   --color-forest: #2E6F40;
   --color-forest-deep: #214F2E;
@@ -10,8 +98,8 @@
   --color-on-forest-muted: rgba(255, 255, 255, 0.78);
   --color-on-forest-faint: rgba(255, 255, 255, 0.20);
 
-  --font-sans: var(--font-geist-sans), 'Geist Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-geist-mono), 'Geist Mono', ui-monospace, monospace;
+  --font-sans: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
+  --font-mono: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
   --font-pixel: var(--font-geist-pixel), 'Geist Pixel', monospace;
   --font-serif: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
 }
@@ -31,14 +119,14 @@ html, body {
   color: #FFFFFF;
   margin: 0;
   padding: 0;
-  font-family: var(--font-geist-sans), 'Geist Sans', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
 }
 
 code, kbd, samp, pre, .font-mono {
-  font-family: var(--font-geist-mono), 'Geist Mono', ui-monospace, monospace;
+  font-family: var(--font-geist-serif), 'Geist Serif', Georgia, serif;
 }
 
 ::selection {
@@ -129,3 +217,77 @@ code, kbd, samp, pre, .font-mono {
     animation: none;
   }
 }
+
+/* Botanical engraving: independent boughs, open centre, true-size leaves. */
+.botanical-divider {
+  background: transparent;
+}
+.vine-transition { position: absolute; inset-inline: 0; top: 50%; transform: translateY(-50%); height: 180px; pointer-events: none; }
+.botanic-art { display: block; width: 100%; height: 180px; overflow: hidden; filter: drop-shadow(0 3px 3px rgba(2, 16, 7, .28)); }
+.botanic-stem, .botanic-stem-highlight, .botanic-curl, .botanic-tip { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
+.botanic-stem { stroke: #738b50; stroke-width: 2; }
+.botanic-stem-highlight { stroke: #bfcd95; stroke-width: .55; opacity: .65; }
+.botanic-bough-back { opacity: .48; }
+.botanic-curl, .botanic-tip { stroke: #96ad6e; stroke-width: .75; }
+.botanic-leaf { transform-origin: 0 0; transform: scale(0) rotate(-18deg); opacity: 0; }
+.botanic-blade { stroke: #a5b880; stroke-width: .45; }
+.botanic-petiole, .botanic-midrib, .botanic-veins { fill: none; stroke: #c0ce9a; stroke-linecap: round; }
+.botanic-petiole { stroke-width: 1; }
+.botanic-midrib { stroke-width: .65; opacity: .7; }
+.botanic-veins { stroke-width: .4; opacity: .3; }
+.botanic-firefly { fill: #e4eeb4; opacity: 0; filter: drop-shadow(0 0 4px #daf2a2); }
+.is-grown .botanic-stem, .is-grown .botanic-stem-highlight { animation: bough-draw 2.4s cubic-bezier(.2,.55,.35,1) both; }
+.is-grown .botanic-leaf { animation: bud-open 1.2s cubic-bezier(.2,.65,.3,1) var(--bud-delay) both; }
+.is-grown .botanic-curl, .is-grown .botanic-tip { animation: bough-draw 1.6s ease 1.5s both; }
+.is-grown .botanic-firefly { animation: woodland-glow 6s ease-in-out infinite; }
+@keyframes bough-draw { to { stroke-dashoffset: 0; } }
+@keyframes bud-open { 0% { opacity: 0; transform: scale(.08) rotate(-18deg); } 50% { opacity: 1; } 100% { opacity: 1; transform: scale(1) rotate(0); } }
+@keyframes woodland-glow { 0%,100% { opacity: 0; transform: translateY(3px); } 45% { opacity: .65; } 70% { opacity: .2; transform: translateY(-7px); } }
+@media (prefers-reduced-motion: reduce) {
+  .is-grown .botanic-stem, .is-grown .botanic-stem-highlight, .is-grown .botanic-curl, .is-grown .botanic-tip { animation: none; stroke-dashoffset: 0; }
+  .is-grown .botanic-leaf { animation: none; opacity: 1; transform: none; }
+  .is-grown .botanic-firefly { animation: none; opacity: 0; }
+}
+
+/* Let the moving sky dissolve into the mountain mist without a hard edge. */
+.mountain-footer {
+  background: transparent;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, rgba(0, 0, 0, .15) 12%, rgba(0, 0, 0, .7) 30%, #000 48%);
+  mask-image: linear-gradient(to bottom, transparent, rgba(0, 0, 0, .15) 12%, rgba(0, 0, 0, .7) 30%, #000 48%);
+}
+
+/* A quiet collection of botanical insects perched in the page margins. */
+.garden-insect { position: absolute; display: block; pointer-events: none; user-select: none; z-index: 2; width: 70px; height: 70px; filter: drop-shadow(0 3px 3px rgba(4, 25, 12, .28)); }
+.garden-insect svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.insect-timeline { top: 9px; right: 7%; width: 92px; height: 92px; transform: rotate(-24deg); }
+.insect-modes { top: 4px; right: 8%; width: 68px; height: 68px; transform: rotate(31deg); }
+.insect-privacy { top: 4px; right: 9%; width: 65px; height: 65px; transform: rotate(-18deg); }
+.insect-launch { top: -21px; right: 32px; width: 39px; height: 39px; transform: rotate(25deg); }
+.insect-vine { top: 26px; left: 19%; width: 25px; height: 25px; transform: rotate(65deg); }
+.garden-insect-dragonfly .insect-wings { transform-origin: 50px 45px; animation: insect-wing-shimmer 7s ease-in-out infinite; }
+.garden-insect-lacewing .insect-wings, .garden-insect-moth .insect-wings { transform-origin: 50px 40px; animation: insect-wing-shimmer 10s ease-in-out infinite; }
+@keyframes insect-wing-shimmer { 0%, 70%, 100% { transform: scaleX(1); opacity: 1; } 78% { transform: scaleX(.89); opacity: .85; } 86% { transform: scaleX(1); opacity: 1; } 92% { transform: scaleX(.94); opacity: .9; } }
+@media (max-width: 640px) {
+  .insect-timeline { top: 5px; right: 25px; width: 64px; height: 64px; }
+  .insect-modes, .insect-privacy { top: 5px; right: 28px; width: 48px; height: 48px; }
+  .insect-launch { right: 23px; width: 34px; height: 34px; top: -18px; }
+  .insect-vine { left: 12%; width: 22px; height: 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .garden-insect .insect-wings { animation: none; }
+}
+
+/* A single, lightweight Luna moth with independently articulated wings. */
+.luna-flyer { position: fixed; left: 0; top: 0; z-index: 30; pointer-events: none; opacity: 0; will-change: transform, opacity; contain: layout style; }
+.luna-flyer-flight { width: 100%; height: 100%; transform-origin: 50% 43%; will-change: transform; }
+.luna-flyer svg { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 3px 4px rgba(3, 25, 12, .3)) drop-shadow(0 0 5px rgba(227, 240, 194, .16)); }
+@media (prefers-reduced-motion: reduce) { .luna-flyer { display: none; } }
+
+.live-room-frame { height: clamp(420px, 65vh, 680px); }
+
+.track-logo-cloud .track-brand { font-family: 'Geist Sans', system-ui, sans-serif; color: rgba(255,255,255,.92); }
+.track-cyber { font-size: clamp(13px, 1.5vw, 17px); font-weight: 550; letter-spacing: -.035em; }
+@media (prefers-reduced-motion: reduce) { .track-logo-cloud > div { transition: none; } }
+
+.winning-headline { font-size: clamp(28px, 6.1vw, 68px); line-height: 1.15; text-shadow: 0 2px 24px rgba(7, 29, 15, .25); }
+@media (max-width: 380px) { .winning-headline { font-size: 25px; } }

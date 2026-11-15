@@ -22,6 +22,9 @@ const colors = {};
 const shown = {};
 
 try { simple = localStorage.lunaMode !== "debug"; show3d = localStorage.luna3d === "1"; } catch (e) {}
+// A presentation embedded in the green frontend starts in 3D without changing saved preferences.
+const embedded = new URLSearchParams(window.location.search).get("embed") === "1";
+if (embedded) { simple = true; show3d = true; document.body.classList.add("embedded"); }
 const remember = (k, v) => { try { localStorage[k] = v; } catch (e) {} };
 
 function colorFor(mac) {
@@ -122,7 +125,7 @@ function ensure3d() {
 }
 // 3D is set aside while the Boards step is open: placing boards needs the 2D map.
 const boardsOpen = () => simple && $("stBoards").open;
-const map3d = () => simple && show3d && !boardsOpen();
+const map3d = () => embedded || (simple && show3d && !boardsOpen());
 function apply3d() {
   const on = map3d();
   document.body.classList.toggle("d3", on);
@@ -261,7 +264,7 @@ function renderSetup() {
   $("sCalClear").classList.toggle("hidden", !c.spots.length && !(c.tests || []).length);
 
   // Wait for the scan and the first board reports so a finished step isn't mistaken for an unfinished one.
-  if (!autoOpened && scanLoaded && (S.nodes.length || performance.now() > 5000)) {
+  if (!embedded && !autoOpened && scanLoaded && (S.nodes.length || performance.now() > 5000)) {
     autoOpened = true;
     const first = [["stRoom", roomDone || boardsDone], ["stBoards", boardsDone], ["stCal", calDone]].find((x) => !x[1]);
     if (first) { $(first[0]).open = true; apply3d(); }

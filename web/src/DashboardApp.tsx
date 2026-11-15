@@ -1,9 +1,7 @@
+import { SiteBackground } from "@/components/ui/site-background"
+import { GeistSerif } from "geist/font/serif"
+import MothLogo from "@/components/ui/moth-logo"
 import React, { useEffect, useRef, useState, useMemo } from 'react'
-import { GeistSans } from 'geist/font/sans'
-import { GeistMono } from 'geist/font/mono'
-import { GeistPixel } from 'geist/font/pixel/variable'
-import { GeistPixelSquare, GeistPixelGrid, GeistPixelCircle, GeistPixelTriangle, GeistPixelLine } from 'geist/font/pixel'
-import { GeistSerif, GeistSerifRegular, GeistSerifSquare, GeistSerifTriangle, GeistSerifHeart } from 'geist/font/serif'
 
 // Conversion helper: metres to feet
 const M_TO_FT = 3.28084
@@ -450,26 +448,25 @@ export default function DashboardApp() {
 
   return (
     <div
-      className={`min-h-screen bg-[#2E6F40] text-white flex flex-col selection:bg-[#8FD3A5] selection:text-[#12301D] ${GeistSans.className}`}
+      className={`site-shell relative isolate min-h-screen text-white flex flex-col selection:bg-[#8FD3A5] selection:text-[#12301D] ${GeistSerif.className}`}
       style={{
-        fontFamily: "var(--font-geist-sans), 'Geist Sans', system-ui, sans-serif",
+        fontFamily: "var(--font-geist-serif), 'Geist Serif', Georgia, serif",
       }}
     >
+      <SiteBackground />
       {/* Top Banner & Header */}
-      <header className="border-b border-white/10 bg-[#214F2E] px-6 py-4 shadow-md sticky top-0 z-30">
+      <header className="border-b border-white/10 bg-[#102b1b]/85 backdrop-blur-xl px-6 py-4 shadow-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <a href="/" className="flex items-center gap-2 group">
-              <svg className="w-6 h-6 text-white transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 4C11.5 2 8 2 5 4C2 6 2 10 4 13C6 16 10 17 12 15C14 17 18 16 20 13C22 10 22 6 19 4C16 2 12.5 2 12 4ZM12 8C11 8 10 10 10 12C10 14 11 15 12 15C13 15 14 14 14 12C14 10 13 8 12 8Z" />
-              </svg>
-              <span className="font-bold tracking-tight text-white text-xl">Moth</span>
+              <MothLogo className="w-7 h-7 text-white transition-transform group-hover:scale-110" />
+              <span className="font-bold tracking-tight text-white text-xl">Actias Luna</span>
             </a>
             <span className="text-white/40">/</span>
-            <span className="font-mono text-sm text-white/80">Dashboard</span>
+            <span className="font-serif text-sm text-white/80">Dashboard</span>
 
             {/* Live / Replay Badge */}
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-mono text-xs font-semibold ${
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-serif text-xs font-semibold ${
               viewMode === 'live' ? 'bg-emerald-500/20 text-[#8FD3A5] border border-emerald-400/30' : 'bg-purple-500/20 text-purple-200 border border-purple-400/30'
             }`}>
               <span className={`h-2 w-2 rounded-full ${viewMode === 'live' ? 'bg-[#8FD3A5] animate-pulse' : 'bg-purple-400'}`} />
@@ -477,7 +474,7 @@ export default function DashboardApp() {
             </span>
 
             {/* Connection status indicator */}
-            <span className="font-mono text-xs text-white/60">
+            <span className="font-serif text-xs text-white/60">
               {isLiveConnected ? 'Connected (4 Hz)' : 'Standalone Preview'}
             </span>
           </div>
@@ -485,18 +482,18 @@ export default function DashboardApp() {
           <div className="flex items-center flex-wrap gap-3">
             {/* Wi-Fi warning if laptop_ip is null */}
             {state.laptop_ip ? (
-              <span className="font-mono text-xs rounded-lg border border-white/20 bg-white/5 px-2.5 py-1 text-white/80">
+              <span className="font-serif text-xs rounded-lg border border-white/20 bg-white/5 px-2.5 py-1 text-white/80">
                 Laptop: <strong className="text-white">{state.laptop_ip}</strong>
               </span>
             ) : (
-              <span className="font-mono text-xs rounded-lg border border-amber-400/40 bg-amber-500/20 px-2.5 py-1 text-amber-200">
+              <span className="font-serif text-xs rounded-lg border border-amber-400/40 bg-amber-500/20 px-2.5 py-1 text-amber-200">
                 ⚠️ Laptop NOT on demo Wi-Fi
               </span>
             )}
 
             {/* Recording badge */}
             {state.recording?.on && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/20 border border-red-400/30 px-3 py-1 font-mono text-xs text-red-200 animate-pulse">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/20 border border-red-400/30 px-3 py-1 font-serif text-xs text-red-200 animate-pulse">
                 <span className="h-2 w-2 rounded-full bg-red-400" />
                 REC ({state.recording.packets} pkts)
               </span>
@@ -505,7 +502,7 @@ export default function DashboardApp() {
             {/* Live / Replay Toggle */}
             <button
               onClick={() => setViewMode(v => v === 'live' ? 'replay' : 'live')}
-              className="rounded-lg border border-white/25 bg-white/10 px-3 py-1 font-mono text-xs font-medium text-white hover:bg-white/20 transition-colors"
+              className="rounded-lg border border-white/25 bg-white/10 px-3 py-1 font-serif text-xs font-medium text-white hover:bg-white/20 transition-colors"
             >
               {viewMode === 'live' ? 'Switch to Replay' : 'Switch to Live'}
             </button>
@@ -535,7 +532,7 @@ export default function DashboardApp() {
 
       {/* Notification Toast */}
       {actionNotice && (
-        <div className="bg-[#12301D] border-b border-[#8FD3A5]/40 text-[#8FD3A5] px-6 py-2 text-center font-mono text-xs animate-in fade-in">
+        <div className="bg-[#12301D] border-b border-[#8FD3A5]/40 text-[#8FD3A5] px-6 py-2 text-center font-serif text-xs animate-in fade-in">
           {actionNotice}
         </div>
       )}
@@ -543,7 +540,7 @@ export default function DashboardApp() {
       {/* Main Workspace */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 flex flex-col gap-6">
         {/* Hint Line */}
-        <div className="rounded-xl border border-white/15 bg-[#214F2E]/60 px-5 py-3 flex flex-wrap items-center justify-between text-xs font-mono text-white/80">
+        <div className="rounded-xl border border-white/15 bg-[#102b1b]/85 backdrop-blur-xl/60 px-5 py-3 flex flex-wrap items-center justify-between text-xs font-serif text-white/80">
           <div className="flex items-center gap-4">
             {unplacedReceivers.length > 0 ? (
               <span className="text-amber-300">⚠️ {unplacedReceivers.length} receivers not placed</span>
@@ -568,7 +565,7 @@ export default function DashboardApp() {
              ========================================================================= */
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Interactive Floor Plan Map (3 cols) */}
-            <div className="lg:col-span-3 rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl flex flex-col">
+            <div className="lg:col-span-3 rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-lg font-bold text-white">Live Floor Plan</h2>
@@ -576,7 +573,7 @@ export default function DashboardApp() {
                     Room: {state.layout?.name || "Room 1"} ({layoutWidthFt} ft × {layoutHeightFt} ft) · 1 ft grid
                   </p>
                 </div>
-                <div className="flex items-center gap-3 font-mono text-xs">
+                <div className="flex items-center gap-3 font-serif text-xs">
                   <span className="flex items-center gap-1.5 text-white/80">
                     <span className="h-3 w-3 rounded-full bg-[#8FD3A5] border border-white" /> Estimated
                   </span>
@@ -602,7 +599,7 @@ export default function DashboardApp() {
               </div>
 
               {/* Status footer for map */}
-              <div className="mt-4 flex flex-wrap items-center justify-between text-xs text-white/70 font-mono">
+              <div className="mt-4 flex flex-wrap items-center justify-between text-xs text-white/70 font-serif">
                 <span>Receivers: {state.nodes.map(n => `${n.label} (${n.status})`).join(', ')}</span>
                 <span>Active Trackers: {activePeople.length}</span>
               </div>
@@ -611,10 +608,10 @@ export default function DashboardApp() {
             {/* Audience Sidebar: People List & Receivers (1 col) */}
             <div className="space-y-6">
               {/* People in Room */}
-              <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-5 shadow-xl">
+              <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-5 shadow-xl">
                 <h3 className="font-bold text-base text-white mb-3 flex items-center justify-between">
                   <span>People in Room</span>
-                  <span className="font-mono text-xs bg-white/10 px-2 py-0.5 rounded-full text-[#8FD3A5]">
+                  <span className="font-serif text-xs bg-white/10 px-2 py-0.5 rounded-full text-[#8FD3A5]">
                     {activePeople.length}
                   </span>
                 </h3>
@@ -635,7 +632,7 @@ export default function DashboardApp() {
                       >
                         <div className="flex items-center justify-between mb-1">
                           <strong className="text-sm text-white font-medium">{p.name}</strong>
-                          <span className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded ${
+                          <span className={`text-[10px] font-serif uppercase px-2 py-0.5 rounded ${
                             p.kind === 'estimated' ? 'bg-[#8FD3A5]/20 text-[#8FD3A5]' : p.kind === 'weak' ? 'border border-[#8FD3A5] text-[#8FD3A5]' : 'bg-white/10 text-white/50'
                           }`}>
                             {p.kind}
@@ -644,7 +641,7 @@ export default function DashboardApp() {
                         <p className="text-xs text-white/80">
                           {p.age > 3 ? `not heard for ${p.age.toFixed(0)} s` : getPlainLocation(p.x, p.y, p.unc)}
                         </p>
-                        <div className="mt-2 text-[11px] font-mono text-white/60 flex justify-between">
+                        <div className="mt-2 text-[11px] font-serif text-white/60 flex justify-between">
                           <span>Pos: ({toFt(p.x).toFixed(1)}, {toFt(p.y).toFixed(1)}) ft</span>
                           <span>Unc: ±{toFt(p.unc).toFixed(1)} ft</span>
                         </div>
@@ -655,27 +652,27 @@ export default function DashboardApp() {
               </div>
 
               {/* Receivers Status */}
-              <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-5 shadow-xl">
+              <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-5 shadow-xl">
                 <h3 className="font-bold text-base text-white mb-3">Receivers Status</h3>
                 <div className="space-y-2.5">
                   {state.nodes.map(node => (
                     <div key={node.id} className="flex items-center justify-between text-xs border-b border-white/10 pb-2">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm bg-white/10 w-6 h-6 rounded flex items-center justify-center font-mono">
+                        <span className="font-bold text-sm bg-white/10 w-6 h-6 rounded flex items-center justify-center font-serif">
                           {node.label}
                         </span>
                         <div>
                           <span className="font-medium text-white">{node.role.toUpperCase()} Node</span>
-                          <span className="text-[10px] text-white/60 block font-mono">{node.ip}</span>
+                          <span className="text-[10px] text-white/60 block font-serif">{node.ip}</span>
                         </div>
                       </div>
                       <div className="text-right">
-                        <span className={`font-mono font-semibold text-[11px] ${
+                        <span className={`font-serif font-semibold text-[11px] ${
                           node.status === 'online' ? 'text-[#8FD3A5]' : node.status === 'stale' ? 'text-amber-300' : 'text-red-300'
                         }`}>
                           ● {node.status}
                         </span>
-                        <span className="text-[10px] text-white/60 block font-mono">{node.frame_rate.toFixed(0)} fps</span>
+                        <span className="text-[10px] text-white/60 block font-serif">{node.frame_rate.toFixed(0)} fps</span>
                       </div>
                     </div>
                   ))}
@@ -700,7 +697,7 @@ export default function DashboardApp() {
                 <button
                   key={tab.id}
                   onClick={() => setDebugSubTab(tab.id as any)}
-                  className={`rounded-lg px-4 py-2 font-mono text-xs font-semibold whitespace-nowrap transition-all ${
+                  className={`rounded-lg px-4 py-2 font-serif text-xs font-semibold whitespace-nowrap transition-all ${
                     debugSubTab === tab.id ? 'bg-white text-[#12301D]' : 'bg-white/10 text-white/70 hover:bg-white/20 hover:text-white'
                   }`}
                 >
@@ -712,7 +709,7 @@ export default function DashboardApp() {
             {/* TAB 1: Layout */}
             {debugSubTab === 'layout' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+                <div className="lg:col-span-2 rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                   <h3 className="text-lg font-bold text-white mb-2">Room Dimensions & Receiver Placement</h3>
                   <p className="text-xs text-white/70 mb-4">
                     Metres internally, shown in feet. Drag or type receiver coordinates.
@@ -749,7 +746,7 @@ export default function DashboardApp() {
                           notify('Suggestion plan received from API')
                         }
                       }}
-                      className="rounded-xl border border-white/30 bg-white/10 px-5 py-2.5 font-mono text-xs font-semibold text-white hover:bg-white/20 transition-all"
+                      className="rounded-xl border border-white/30 bg-white/10 px-5 py-2.5 font-serif text-xs font-semibold text-white hover:bg-white/20 transition-all"
                     >
                       Suggest receiver spots (/api/plan)
                     </button>
@@ -770,7 +767,7 @@ export default function DashboardApp() {
                           }
                         })
                       }}
-                      className="rounded-xl bg-white px-6 py-2.5 font-mono text-xs font-bold text-[#12301D] hover:bg-white/90 shadow transition-all"
+                      className="rounded-xl bg-white px-6 py-2.5 font-serif text-xs font-bold text-[#12301D] hover:bg-white/90 shadow transition-all"
                     >
                       Save Layout (/api/layout)
                     </button>
@@ -778,25 +775,25 @@ export default function DashboardApp() {
                 </div>
 
                 {/* Receiver List & Coord Inputs */}
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl space-y-4">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl space-y-4">
                   <h4 className="font-bold text-sm text-white">Room Size (Feet)</h4>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-[11px] font-mono text-white/60 mb-1">Width (ft)</label>
+                      <label className="block text-[11px] font-serif text-white/60 mb-1">Width (ft)</label>
                       <input
                         type="number"
                         value={layoutWidthFt}
                         onChange={e => setLayoutWidthFt(Number(e.target.value))}
-                        className="w-full rounded-lg bg-black/30 border border-white/20 px-3 py-1.5 font-mono text-sm text-white"
+                        className="w-full rounded-lg bg-black/30 border border-white/20 px-3 py-1.5 font-serif text-sm text-white"
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-mono text-white/60 mb-1">Height (ft)</label>
+                      <label className="block text-[11px] font-serif text-white/60 mb-1">Height (ft)</label>
                       <input
                         type="number"
                         value={layoutHeightFt}
                         onChange={e => setLayoutHeightFt(Number(e.target.value))}
-                        className="w-full rounded-lg bg-black/30 border border-white/20 px-3 py-1.5 font-mono text-sm text-white"
+                        className="w-full rounded-lg bg-black/30 border border-white/20 px-3 py-1.5 font-serif text-sm text-white"
                       />
                     </div>
                   </div>
@@ -808,10 +805,10 @@ export default function DashboardApp() {
                       return (
                         <div key={n.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
                           <div className="flex items-center justify-between mb-2">
-                            <span className="font-bold text-white font-mono text-xs">Node {n.label} ({n.role})</span>
-                            <span className="text-[10px] text-white/50 font-mono">{n.id}</span>
+                            <span className="font-bold text-white font-serif text-xs">Node {n.label} ({n.role})</span>
+                            <span className="text-[10px] text-white/50 font-serif">{n.id}</span>
                           </div>
-                          <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                          <div className="grid grid-cols-2 gap-2 text-xs font-serif">
                             <div>
                               <span className="text-[10px] text-white/50 block">X (ft)</span>
                               <input
@@ -851,15 +848,15 @@ export default function DashboardApp() {
             {debugSubTab === 'calibrate' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Phone Setup & PIN */}
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl space-y-4">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl space-y-4">
                   <h3 className="text-lg font-bold text-white">Phone Calibration Connect</h3>
                   <div className="rounded-xl border border-white/15 bg-black/20 p-5 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-white/70">Phone Setup URL</span>
-                      <span className="font-mono text-xs text-[#8FD3A5]">HTTPS Only</span>
+                      <span className="font-serif text-xs text-[#8FD3A5]">HTTPS Only</span>
                     </div>
                     {state.laptop_ip ? (
-                      <p className="font-mono text-base font-bold text-white break-all">
+                      <p className="font-serif text-base font-bold text-white break-all">
                         https://{state.laptop_ip}:{state.phone_cal?.port ?? 8081}/
                       </p>
                     ) : (
@@ -870,7 +867,7 @@ export default function DashboardApp() {
 
                     <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between">
                       <span className="text-sm text-white/80">4-Digit Security PIN:</span>
-                      <span className="font-mono text-2xl font-black tracking-widest text-[#8FD3A5] bg-[#12301D] px-4 py-1 rounded-lg border border-white/20">
+                      <span className="font-serif text-2xl font-black tracking-widest text-[#8FD3A5] bg-[#12301D] px-4 py-1 rounded-lg border border-white/20">
                         {state.phone_cal?.pin || "----"}
                       </span>
                     </div>
@@ -878,7 +875,7 @@ export default function DashboardApp() {
 
                   <div className="pt-2">
                     <h4 className="font-bold text-sm text-white mb-2">Accuracy Evaluation</h4>
-                    <div className="grid grid-cols-3 gap-3 font-mono text-center">
+                    <div className="grid grid-cols-3 gap-3 font-serif text-center">
                       <div className="rounded-lg bg-white/5 border border-white/10 p-3">
                         <span className="text-[10px] text-white/60 block">TYPICAL ERROR</span>
                         <strong className="text-base text-white">
@@ -904,7 +901,7 @@ export default function DashboardApp() {
                     <button
                       onClick={() => callApi('/api/empty/start')}
                       disabled={!!state.capture}
-                      className="flex-1 rounded-xl border border-white/20 bg-white/10 py-3 font-mono text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+                      className="flex-1 rounded-xl border border-white/20 bg-white/10 py-3 font-serif text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
                     >
                       Record empty room (/api/empty/start)
                     </button>
@@ -914,7 +911,7 @@ export default function DashboardApp() {
                           callApi('/api/calib/clear')
                         }
                       }}
-                      className="rounded-xl border border-red-400/40 bg-red-500/20 px-4 py-3 font-mono text-xs text-red-200 hover:bg-red-500/30"
+                      className="rounded-xl border border-red-400/40 bg-red-500/20 px-4 py-3 font-serif text-xs text-red-200 hover:bg-red-500/30"
                     >
                       Clear All
                     </button>
@@ -922,20 +919,20 @@ export default function DashboardApp() {
                 </div>
 
                 {/* Spot List */}
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                   <h3 className="text-lg font-bold text-white mb-2">Calibration Walks & Spots</h3>
                   <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
                     {state.calib?.spots && state.calib.spots.length > 0 ? (
                       state.calib.spots.map((spot) => (
                         <div key={spot.i} className="flex items-center justify-between text-xs rounded-lg border border-white/10 bg-white/5 p-3">
-                          <div className="font-mono">
+                          <div className="font-serif">
                             <span className="font-bold text-white">Spot #{spot.i}</span>
                             <span className="text-white/60 ml-2">({toFt(spot.x).toFixed(1)} ft, {toFt(spot.y).toFixed(1)} ft)</span>
                             <span className="text-white/40 block text-[10px]">{spot.kind} · {spot.group || "ungrouped"} · {spot.frames || 0} frames</span>
                           </div>
                           <button
                             onClick={() => callApi('/api/spot/delete', { i: spot.i })}
-                            className="rounded px-2.5 py-1 font-mono text-[11px] text-red-300 hover:bg-red-500/20"
+                            className="rounded px-2.5 py-1 font-serif text-[11px] text-red-300 hover:bg-red-500/20"
                           >
                             Delete
                           </button>
@@ -954,7 +951,7 @@ export default function DashboardApp() {
             {/* TAB 3: Settings & Lab */}
             {debugSubTab === 'settings' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl space-y-5">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl space-y-5">
                   <h3 className="text-lg font-bold text-white">Filter & Tracking Switches</h3>
                   <div className="space-y-4">
                     {Object.entries(state.settings_info || {}).map(([key, [title, desc]]) => {
@@ -983,7 +980,7 @@ export default function DashboardApp() {
                     </div>
                     <button
                       onClick={() => callApi('/api/lab/run')}
-                      className="rounded-xl bg-white px-5 py-2 font-mono text-xs font-bold text-[#12301D] hover:bg-white/90"
+                      className="rounded-xl bg-white px-5 py-2 font-serif text-xs font-bold text-[#12301D] hover:bg-white/90"
                     >
                       Run Lab (/api/lab/run)
                     </button>
@@ -991,11 +988,11 @@ export default function DashboardApp() {
                 </div>
 
                 {/* Lab Benchmarking Table */}
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                   <h3 className="text-lg font-bold text-white mb-2">Lab Comparison Results</h3>
                   {state.lab?.rows && state.lab.rows.length > 0 ? (
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left font-mono text-xs">
+                      <table className="w-full text-left font-serif text-xs">
                         <thead>
                           <tr className="border-b border-white/15 text-white/60">
                             <th className="py-2">CONFIG</th>
@@ -1028,10 +1025,10 @@ export default function DashboardApp() {
             {/* TAB 4: Telemetry & Spark */}
             {debugSubTab === 'telemetry' && (
               <div className="space-y-6">
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                   <h3 className="text-lg font-bold text-white mb-4">Receiver Nodes Telemetry</h3>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left font-mono text-xs">
+                    <table className="w-full text-left font-serif text-xs">
                       <thead>
                         <tr className="border-b border-white/15 text-white/60">
                           <th className="py-2">NODE</th>
@@ -1071,7 +1068,7 @@ export default function DashboardApp() {
                 </div>
 
                 {/* Tracked Phones RSSI per Node */}
-                <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+                <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                   <h3 className="text-lg font-bold text-white mb-4">Tracked Phones RSSI & Sparkline</h3>
                   <div className="space-y-4">
                     {state.phones.map(phone => (
@@ -1079,11 +1076,11 @@ export default function DashboardApp() {
                         <div className="flex items-center justify-between mb-3">
                           <div>
                             <strong className="text-sm text-white">{phone.name}</strong>
-                            <span className="font-mono text-xs text-white/60 ml-2">({phone.mac_fmt})</span>
+                            <span className="font-serif text-xs text-white/60 ml-2">({phone.mac_fmt})</span>
                           </div>
-                          <span className="font-mono text-xs text-white/70">IP: {phone.ip}</span>
+                          <span className="font-serif text-xs text-white/70">IP: {phone.ip}</span>
                         </div>
-                        <div className="grid grid-cols-3 gap-3 font-mono text-xs">
+                        <div className="grid grid-cols-3 gap-3 font-serif text-xs">
                           {Object.entries(phone.per_node || {}).map(([nId, data]) => (
                             <div key={nId} className="bg-black/20 rounded p-2 border border-white/10">
                               <span className="text-[10px] text-white/50 block">Receiver {nId}</span>
@@ -1101,9 +1098,9 @@ export default function DashboardApp() {
 
             {/* TAB 5: Events Log */}
             {debugSubTab === 'events' && (
-              <div className="rounded-2xl border border-white/20 bg-[#214F2E] p-6 shadow-xl">
+              <div className="rounded-2xl border border-white/20 bg-[#102b1b]/85 backdrop-blur-xl p-6 shadow-xl">
                 <h3 className="text-lg font-bold text-white mb-3">Events Log (Last 25)</h3>
-                <div className="space-y-2 font-mono text-xs max-h-96 overflow-y-auto">
+                <div className="space-y-2 font-serif text-xs max-h-96 overflow-y-auto">
                   {state.events && state.events.length > 0 ? (
                     state.events.map(([time, msg], i) => (
                       <div key={i} className="flex gap-4 border-b border-white/5 py-1.5">
@@ -1205,7 +1202,7 @@ function FloorPlanSvg({
             fill="rgba(255,255,255,0.7)"
             textAnchor="middle"
             dominantBaseline="central"
-            fontFamily="monospace"
+            fontFamily="Geist Serif, Georgia, serif"
           >
             {obj.label}
           </text>
@@ -1245,7 +1242,7 @@ function FloorPlanSvg({
               fill="#FFFFFF"
               fontWeight="bold"
               textAnchor="middle"
-              fontFamily="monospace"
+              fontFamily="Geist Serif, Georgia, serif"
             >
               {node.label}
             </text>
@@ -1304,7 +1301,7 @@ function FloorPlanSvg({
               fill="#FFFFFF"
               fontWeight="bold"
               textAnchor="middle"
-              fontFamily="sans-serif"
+              fontFamily="Geist Serif, Georgia, serif"
             >
               {person.name}
             </text>

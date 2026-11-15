@@ -1,36 +1,32 @@
-import { GeistSans } from 'geist/font/sans'
-import { GeistMono } from 'geist/font/mono'
-import { GeistPixel } from 'geist/font/pixel/variable'
-import { GeistPixelSquare, GeistPixelGrid, GeistPixelCircle, GeistPixelTriangle, GeistPixelLine } from 'geist/font/pixel'
-import { GeistSerif, GeistSerifRegular, GeistSerifSquare, GeistSerifTriangle, GeistSerifHeart } from 'geist/font/serif'
+import { SiteBackground } from "@/components/ui/site-background"
+import { GeistSerif } from "geist/font/serif"
 
 import Hero from "@/components/hero"
 import Nav from "@/components/nav"
 import ScrollMoth from "@/components/ui/scroll-moth"
 import TimelineSection from "@/components/timeline-section"
-import TwoWaysSection from "@/components/two-ways-section"
-import SecurityPrivacySection from "@/components/security-privacy-section"
+import WhyWinSection from "@/components/why-win-section"
+import HackathonTracksSection from "@/components/hackathon-tracks-section"
 import LaunchSection from "@/components/launch-section"
 import Footer from "@/components/footer"
 
 export default function App() {
   return (
     <div
-      className={`min-h-screen bg-[#2E6F40] text-white flex flex-col selection:bg-[#8FD3A5] selection:text-[#12301D] ${GeistSans.className}`}
+      className={`site-shell relative isolate min-h-screen text-white flex flex-col selection:bg-[#8FD3A5] selection:text-[#12301D] ${GeistSerif.className}`}
       style={{
-        fontFamily: "var(--font-geist-sans), 'Geist Sans', system-ui, sans-serif",
+        fontFamily: "var(--font-geist-serif), 'Geist Serif', Georgia, serif",
       }}
     >
+      <SiteBackground />
       {/* 1. Logo Hero (Top of site, full screen, 100svh) */}
       <Hero />
 
       {/* Flying white Luna moth starting under the logo */}
       <ScrollMoth
-        src="/static/moth-luna/"
-        sprite="luna"
-        width={120}
-        flapSpeed={0.4}
-        flapDepth={0.5}
+        width={78}
+        flapSpeed={0.75}
+        flapDepth={0.48}
       />
 
       {/* Sticky header after hero */}
@@ -39,11 +35,11 @@ export default function App() {
       {/* 2. Scroll Timeline */}
       <TimelineSection />
 
-      {/* 3. Two ways to see someone */}
-      <TwoWaysSection />
+      {/* 3. What makes the project stand out */}
+      <WhyWinSection />
 
-      {/* 4. Security and privacy */}
-      <SecurityPrivacySection />
+      {/* 4. Hackathon tracks */}
+      <HackathonTracksSection />
 
       {/* 5. Launch dashboard & phone setup */}
       <LaunchSection />
