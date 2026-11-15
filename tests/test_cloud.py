@@ -201,6 +201,28 @@ class ObserverTests(unittest.TestCase):
         self.assertFalse(watching)
         self.assertNotIn("aabb", json.dumps(seen))
 
+    def test_board_unplugged_and_back(self):
+        obs, t0, got = cs.Observer(), 1_800_000_000.0, []
+        heard = {"A": t0, "B": None}                        # B never heard: no news about it
+        for i in range(40):
+            t = t0 + i
+            heard["A"] = t if i < 10 or i >= 30 else heard["A"]
+            got += obs.step(t, {}, self.POINTS, 0, True, dict(heard))["events"]
+        self.assertEqual([(e["kind"], e["point"], e["pid"]) for e in got],
+                         [("board_offline", "A", "board"), ("board_online", "A", "board")])
+        self.assertEqual(got[0]["t"], t0 + 9)                 # stamped when it was last heard, not when noticed
+        self.assertEqual(got[1]["t"], t0 + 30)
+
+    def test_board_status_reads_labels_and_last_heard(self):
+        class N:
+            last = 123.0
+
+        class Live:
+            nodes = {"n1": N()}
+            label = staticmethod(lambda nid: {"n1": "A", "n2": "B"}[nid])
+
+        self.assertEqual(cs.board_status(Live, {"receivers": {"n1": {}, "n2": {}}}), {"A": 123.0, "B": None})
+
     def test_fresh_trace_is_sent_as_the_position(self):
         class Ph:
             raw, est, last = {"x": 1.0, "y": 1.0}, {"kind": "estimated"}, 100.0
@@ -236,6 +258,58 @@ class NarrativeTests(unittest.TestCase):
         out = mc.describe_activity(st, "r", now - 600, now + 1, UTC, now)
         self.assertEqual(out["answer"], "Someone entered 30 seconds ago, stood by point A for 10 seconds, then "
                                         "wandered to point B and stood there for 5 seconds, then left just now.")
+        st.close()
+
+    def test_board_unplugged_mid_visit(self):
+        st, now = mc.Store(":memory:"), time.time()
+        st.add("r", [{"t": now - 2, "in": 0}])
+        st.add_events("r", [
+            {"t": now - 30, "pid": "person-1", "kind": "enter"},
+            {"t": now - 28, "pid": "person-1", "kind": "arrive", "point": "A"},
+            {"t": now - 18, "pid": "person-1", "kind": "depart", "point": "A", "dur": 10},
+            {"t": now - 14, "pid": "person-1", "kind": "arrive", "point": "B"},
+            {"t": now - 11, "pid": "board", "kind": "board_offline", "point": "B"},
+            {"t": now - 9, "pid": "person-1", "kind": "depart", "point": "B", "dur": 5},
+            {"t": now - 5, "pid": "person-1", "kind": "leave"}])
+        out = mc.describe_activity(st, "r", now - 600, now + 1, UTC, now)
+        self.assertEqual(out["answer"], "Someone entered 30 seconds ago, stood by point A for 10 seconds, then "
+                                        "wandered to point B and stood there for 5 seconds, then board B went "
+                                        "offline, then left just now. Board B is still offline, so tracking near "
+                                        "it may be off.")
+        self.assertEqual(len(out["visits"]), 1)              # the board is not a visitor
+        self.assertIn("board B went offline", mc.status_now(st, "r", UTC, now)["answer"])
+        self.assertEqual(mc.where_now(st, "r", UTC, now)["boards_offline"], ["B"])
+        st.add_events("r", [{"t": now - 1, "pid": "board", "kind": "board_online", "point": "B"}])
+        self.assertNotIn("offline", mc.status_now(st, "r", UTC, now)["answer"])
+        self.assertTrue(mc.describe_activity(st, "r", now - 600, now + 1, UTC, now)["answer"].endswith(
+            "then left just now. Board B came back online just now."))
+        st.close()
+
+    def test_board_outage_with_nobody_in(self):
+        st, now = mc.Store(":memory:"), time.time()
+        st.add("r", [{"t": now - 2, "in": 0}])
+        st.add_events("r", [{"t": now - 120, "pid": "board", "kind": "board_offline", "point": "C"}])
+        self.assertEqual(mc.describe_activity(st, "r", now - 600, now + 1, UTC, now)["answer"],
+                         "Nobody has been in the room in the last 10 minutes. Board C went offline 2 minutes ago. "
+                         "Board C is still offline, so tracking near it may be off.")
+        st.close()
+
+    def test_repeat_stops_merge_and_long_wander_is_summarised(self):
+        st, now = mc.Store(":memory:"), time.time()
+        st.add("r", [{"t": now - 2, "in": 0}])
+        ev, t = [{"t": now - 900, "pid": "person-1", "kind": "enter"}], now - 890
+        for point, stay in [("C", 20), ("C", 100), ("B", 15), ("A", 5), ("C", 30), ("B", 10), ("C", 40), ("A", 6)]:
+            ev += [{"t": t, "pid": "person-1", "kind": "arrive", "point": point},
+                   {"t": t + stay, "pid": "person-1", "kind": "depart", "point": point, "dur": stay}]
+            t += stay + 3
+        ev.append({"t": t, "pid": "person-1", "kind": "leave"})
+        st.add_events("r", ev)
+        answer = mc.describe_activity(st, "r", now - 1200, now + 1, UTC, now)["answer"]
+        self.assertTrue(answer.startswith("Someone entered 15 minutes ago, stood by point C for 2 minutes, "
+                                          "then moved around point A, point B and point C for "), answer)
+        self.assertIn("mostly by point C, then wandered to point C and stood there for 40 seconds, then wandered "
+                      "to point A and stood there for 6 seconds, then left", answer)
+        self.assertNotIn("wandered to point C and stood there for 1", answer)
         st.close()
 
     def test_ongoing_and_quiet(self):

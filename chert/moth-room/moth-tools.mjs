@@ -86,6 +86,8 @@ Speak the tool's "answer" naturally and briefly, keeping its times ("30 seconds 
 Be honest about limits:
 - You know how many people there were and where they stood, never WHO they were. If asked who, say so.
 - If a tool says the sensors weren't reporting, say you weren't watching then. Never turn that into "nobody was there".
+- Boards A, B and C are the sensors at those points. If a tool says a board went offline (it was unplugged or lost
+  power), keep that in the story where it happened, and mention when one is still offline.
 - If the history service is unreachable, say so plainly.
 Keep every reply to one to three short sentences, and be clear that you are an AI.`;
 }

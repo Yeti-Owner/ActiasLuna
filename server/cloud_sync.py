@@ -14,6 +14,8 @@ earlier run still upload under that run, and the cloud answers only about the la
 Wire format (POST /ingest, metres, epoch seconds; moth_cloud.Store validates it):
   {"room", "points": {"A": [x, y]}, "samples": [{t, in, nearby, zones}], "positions": [{t, pid, x, y}],
    "events": [{t, pid, kind: enter|leave|arrive|depart, point?, dur?, x?, y?}]}   each item also has "run"
+Board health rides in "events" too: {t, pid: "board", kind: board_offline|board_online, point: <board label>}, sent
+only on a change after the board was heard in this run, stamped with when it was last / first heard again.
 """
 from __future__ import annotations
 
@@ -75,6 +77,7 @@ class Observer:
         self.pids: Dict[str, str] = {}
         self.last_sample = -math.inf
         self.last_key = None
+        self.boards: Dict[str, bool] = {}     # board label -> online; absent until first heard this run
 
     def pid(self, mac: str) -> str:
         if mac not in self.pids:
@@ -118,10 +121,28 @@ class Observer:
                        "dur": round(end - p.at_since, 1)})
         ev.append({"t": round(p.last, 2), "pid": p.pid, "kind": "leave", "x": round(p.x, 2), "y": round(p.y, 2)})
 
-    def step(self, t: float, seen: Dict[str, tuple], points: dict, nearby: int, watching: bool) -> dict:
-        """seen: pid -> (x, y) of people inside the room this tick. Returns {samples, positions, events}."""
+    def _boards(self, t: float, boards: dict, ev: list):
+        for label, last in boards.items():
+            online = last is not None and t - last <= NODE_FRESH_S
+            was = self.boards.get(label)
+            if was is None:
+                if online:
+                    self.boards[label] = True     # first heard: the baseline, not news
+                continue
+            if was and not online:
+                ev.append({"t": round(last, 2), "pid": "board", "kind": "board_offline", "point": label})
+            elif online and not was:
+                ev.append({"t": round(last, 2), "pid": "board", "kind": "board_online", "point": label})
+            self.boards[label] = online
+
+    def step(self, t: float, seen: Dict[str, tuple], points: dict, nearby: int, watching: bool,
+             boards: Optional[dict] = None) -> dict:
+        """seen: pid -> (x, y) of people inside the room this tick; boards: label -> last heard (wall time) or None.
+        Returns {samples, positions, events}."""
         out = {"samples": [], "positions": [], "events": []}
         ev = out["events"]
+        if boards:
+            self._boards(t, boards, ev)
         for pid, (x, y) in seen.items():
             p = self.people.get(pid)
             if p is None:
@@ -184,6 +205,15 @@ def sightings(live, layout: dict, observer: Observer, t: float):
             seen["body"] = (bx, by)
     watching = any(n.last is not None and t - n.last <= NODE_FRESH_S for n in live.nodes.values())
     return seen, nearby, watching
+
+
+def board_status(live, layout: dict) -> dict:
+    """Board label -> when it was last heard (wall time, the clock Node.last uses) or None. Call under App.lock."""
+    out = {}
+    for nid in layout["receivers"]:
+        node = live.nodes.get(nid)
+        out[str(live.label(nid))] = node.last if node is not None else None
+    return out
 
 
 def _near_box(x: float, y: float, poly, margin: float) -> bool:

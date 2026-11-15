@@ -863,7 +863,8 @@ class App:
                 with self.lock:
                     points = cloud_sync.points_from(self.layout, self.live.label, self.cloud.cfg.get("points"))
                     seen, nearby, watching = cloud_sync.sightings(self.live, self.layout, self.cloud_obs, now)
-                    out = self.cloud_obs.step(now, seen, points, nearby, watching)
+                    boards = cloud_sync.board_status(self.live, self.layout)
+                    out = self.cloud_obs.step(now, seen, points, nearby, watching, boards)
                 self.cloud.points = points
                 for kind, key in (("s", "samples"), ("p", "positions"), ("e", "events")):
                     self.cloud.spool.add(kind, out[key], self.cloud_run)

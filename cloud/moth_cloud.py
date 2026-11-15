@@ -56,12 +56,15 @@ MAX_COORD_M = 1000.0
 WHERE_FRESH_S = 10.0        # a position older than this is not "right now"
 LOOKBACK_S = 6 * 3600       # how far back to look for the start of a visit still running at the window's start
 MAX_VISITS_SPOKEN = 5
+MAX_STOPS_SPOKEN = 4        # a visit with more stops than this is summarised in the middle (_spoken_stops)
+SPOKEN_TAIL_STOPS = 2
 PRUNE_EVERY_S = 600         # a new run's predecessor-but-one loses its positions within this long
 ROOM_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 ZONE_RE = re.compile(r"^[A-Za-z0-9_. -]{1,32}$")
 PID_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 RUN_RE = re.compile(r"^[A-Za-z0-9_.-]{0,64}$")
-KINDS = ("enter", "leave", "arrive", "depart")
+BOARD_KINDS = ("board_offline", "board_online")     # pid "board", point = the board's label (cloud_sync.Observer)
+KINDS = ("enter", "leave", "arrive", "depart") + BOARD_KINDS
 
 
 def _finite(v, lo=-MAX_COORD_M, hi=MAX_COORD_M):
@@ -325,6 +328,8 @@ def visits(events):
     out, open_v = [], {}
     for e in events:
         pid, kind, t = e["pid"], e["kind"], e["t"]
+        if kind in BOARD_KINDS:
+            continue
         v = open_v.get(pid)
         if kind == "enter":
             v = {"pid": pid, "start": t, "end": None, "stops": []}
@@ -427,22 +432,68 @@ def _interval_json(iv, tz):
             "mostly_near_board": _top_zone(iv["zones"])}
 
 
-def _visit_sentence(v, t0, now, tz):
+def _spoken_stops(stops):
+    """Stops as said aloud. Back-to-back stops at one point are one stay (estimate jitter at the 1.4 m exit edge splits
+    them), and a long wander keeps its first and last SPOKEN_TAIL_STOPS stops with one summary in between."""
+    merged = []
+    for s in stops:
+        if merged and merged[-1]["point"] == s["point"] and merged[-1]["end"] is not None:
+            merged[-1] = {"point": s["point"], "start": merged[-1]["start"], "end": s["end"]}
+        else:
+            merged.append(dict(s))
+    if len(merged) <= MAX_STOPS_SPOKEN:
+        return merged
+    middle = merged[1:-SPOKEN_TAIL_STOPS]
+    time_at = {}
+    for s in middle:
+        time_at[s["point"]] = time_at.get(s["point"], 0.0) + s["end"] - s["start"]
+    summary = {"between": sorted(time_at), "mostly": max(time_at, key=time_at.get), "start": middle[0]["start"],
+               "seconds": middle[-1]["end"] - middle[0]["start"]}
+    return merged[:1] + [summary] + merged[-SPOKEN_TAIL_STOPS:]
+
+
+def _points_list(points):
+    names = [f"point {p}" for p in points]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _board_phrase(e):
+    return f"board {e['point']} " + ("went offline" if e["kind"] == "board_offline" else "came back online")
+
+
+def _visit_sentence(v, t0, now, tz, board_events=()):
+    """board_events: board changes during this visit, woven in by time."""
     parts = []
     if v["start"] is not None and v["start"] >= t0:
         parts.append(f"Someone entered {_when(v['start'], now, tz)}")
     else:
         parts.append("Someone was already in the room")
-    for i, s in enumerate(v["stops"]):
+    items = sorted([(s["start"], 0, s) for s in _spoken_stops(v["stops"])] +
+                   [(e["t"], 1, e) for e in board_events], key=lambda i: (i[0], i[1]))
+    still_at = None
+    for i, (_, _, s) in enumerate(items):
+        if "kind" in s:
+            parts.append("then " + _board_phrase(s))
+            continue
+        if "between" in s:
+            parts.append(f"then moved around {_points_list(s['between'])} for {_short(s['seconds'])}, "
+                         f"mostly by point {s['mostly']}")
+            continue
         p = f"point {s['point']}"
-        if s["end"] is None:
+        if s["end"] is None and i < len(items) - 1:
+            # A board change came after they reached this point: say where they are once the story is told.
+            parts.append(f"stood by {p}" if i == 0 else f"then wandered to {p}")
+            still_at = p
+        elif s["end"] is None:
             parts.append(f"and is standing by {p} now" if i == 0 else f"then wandered to {p}, where they are now")
         elif i == 0:
             parts.append(f"stood by {p} for {_short(s['end'] - s['start'])}")
         else:
             parts.append(f"then wandered to {p} and stood there for {_short(s['end'] - s['start'])}")
     if v["end"] is not None:
-        parts.append(("then left " if v["stops"] else "and left ") + _when(v["end"], now, tz))
+        parts.append(("then left " if items else "and left ") + _when(v["end"], now, tz))
+    elif still_at:
+        parts.append(f"and they're still by {still_at}")
     elif not v["stops"] or v["stops"][-1]["end"] is not None:
         parts.append("and is still in the room")
     text = parts[0]
@@ -469,29 +520,73 @@ def _reporting_note(store, room, t1, now, run=None):
     return None
 
 
+def boards_down(store, room, now, run=None):
+    """Board label -> since when it has been offline, for boards whose latest change is board_offline."""
+    state = {}
+    for e in store.events(room, now - 30 * 86400, now + 1, run):
+        if e["kind"] in BOARD_KINDS:
+            state[e["point"]] = e
+    return {b: e["t"] for b, e in sorted(state.items()) if e["kind"] == "board_offline"}
+
+
+def _down_note(down, now, tz, mentioned=()):
+    """One sentence on boards still offline; boards the story already said went offline just get "still"."""
+    if not down:
+        return None
+    bits = [f"board {b} is still offline" if b in mentioned else f"board {b} went offline {_when(t, now, tz)} "
+            f"and is still offline" for b, t in down.items()]
+    text = "; ".join(bits) + ", so tracking near " + ("it" if len(down) == 1 else "them") + " may be off."
+    return ("Heads up: " + text) if not all(b in mentioned for b in down) else text[0].upper() + text[1:]
+
+
 def describe_activity(store, room, t0, t1, tz, now=None, run=None):
-    """Who came and went in [t0, t1), spoken as a short story per visit."""
+    """Who came and went in [t0, t1), spoken as a short story per visit, with board outages woven in."""
     now = time.time() if now is None else now
-    vs = [v for v in visits(store.events(room, t0 - LOOKBACK_S, t1, run))
+    events = store.events(room, t0 - LOOKBACK_S, t1, run)
+    vs = [v for v in visits(events)
           if (v["end"] is None or v["end"] >= t0) and (v["start"] is None or v["start"] < t1)]
+    board_ev = [e for e in events if e["kind"] in BOARD_KINDS and t0 <= e["t"] < t1]
     note = _reporting_note(store, room, t1, now, run)
     if store.last_report(room, run) is None:
         return {"room": room, "answer": note, "visits": []}
+    spoken = vs[-MAX_VISITS_SPOKEN:]
+    told = set()
+
+    def during(v):
+        lo = -math.inf if v["start"] is None else v["start"]
+        hi = math.inf if v["end"] is None else v["end"]
+        mine = [e for e in board_ev if lo <= e["t"] <= hi and id(e) not in told]
+        told.update(id(e) for e in mine)
+        return mine
+
+    sentences = [(v["start"] if v["start"] is not None else t0, _visit_sentence(v, t0, now, tz, during(v)))
+                 for v in spoken]
+    # Board changes while nobody was in the room get their own short sentence, in time order with the visits.
+    sentences += [(e["t"], f"{_board_phrase(e)[0].upper()}{_board_phrase(e)[1:]} {_when(e['t'], now, tz)}.")
+                  for e in board_ev if id(e) not in told]
+    sentences.sort(key=lambda s: s[0])
     if not vs:
         window = _short(min(t1, now) - t0) if t1 >= now - 1 else None
-        answer = f"Nobody has been in the room in the last {window}." if window else \
+        nobody = f"Nobody has been in the room in the last {window}." if window else \
             f"Nobody was in the room between {_clock(t0, tz)} and {_clock(t1, tz)}."
+        answer = " ".join([nobody] + [s for _, s in sentences])
     else:
-        spoken = vs[-MAX_VISITS_SPOKEN:]
-        answer = " ".join(_visit_sentence(v, t0, now, tz) for v in spoken)
+        answer = " ".join(s for _, s in sentences)
         if len(vs) > len(spoken):
             answer = f"There were {len(vs)} visits; the latest {len(spoken)}: " + answer
         current = sum(1 for v in vs if v["end"] is None)
         if current > 1:
             answer += f" Right now there are {current} people in the room."
+    if t1 >= now - 1:
+        # Still down and not already in the story: say so, or a quiet board reads as an empty corner.
+        down = boards_down(store, room, now, run)
+        if down:
+            mentioned = {e["point"] for e in board_ev if e["kind"] == "board_offline"}
+            answer += " " + _down_note(down, now, tz, mentioned)
     if note:
         answer = note + " " + answer
-    return {"room": room, "answer": answer, "visits": [_visit_json(v, tz) for v in vs]}
+    return {"room": room, "answer": answer, "visits": [_visit_json(v, tz) for v in vs],
+            "board_events": [{"board": e["point"], "kind": e["kind"], "t": round(e["t"], 2)} for e in board_ev]}
 
 
 def where_now(store, room, tz, now=None, run=None):
@@ -527,9 +622,12 @@ def where_now(store, room, tz, now=None, run=None):
         answer = "There's 1 person in the room: " + bits[0].replace("one is", "they're", 1) + "."
     else:
         answer = f"There are {len(people)} people in the room: " + "; ".join(bits) + "."
+    down = boards_down(store, room, now, run)
+    if down:
+        answer += " " + _down_note(down, now, tz)
     if note:
         answer = note + " " + answer
-    return {"room": room, "answer": answer, "people": people, "points": points}
+    return {"room": room, "answer": answer, "people": people, "points": points, "boards_offline": sorted(down)}
 
 
 def summarize_day(store, room, day, tz, run=None):
@@ -596,8 +694,11 @@ def status_now(store, room, tz, now=None, run=None):
     if n_near:
         answer += f" {n_near} other device{'s are' if n_near != 1 else ' is'} being picked up nearby " \
                   f"but {'are' if n_near != 1 else 'is'}n't placed inside the room."
+    down = boards_down(store, room, now, run)
+    if down:
+        answer += " " + _down_note(down, now, tz)
     return {"room": room, "status": status, "in": n_in, "nearby": n_near, "zones": zones,
-            "last_report": round(t), "answer": answer}
+            "last_report": round(t), "answer": answer, "boards_offline": sorted(down)}
 
 
 def _parse_when(value, tz):
