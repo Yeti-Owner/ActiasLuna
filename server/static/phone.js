@@ -378,9 +378,10 @@ function fitView() {
     canvas.style.height = h + "px";
   }
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  tf = { k, ox: (w - (x1 - x0) * k) / 2 - x0 * k, oy: pad - y0 * k, w, h };
+  // Turned 180 degrees like the dashboard (app.js fitView): the TV end of the room is at the top.
+  tf = { k, ox: (w - (x1 - x0) * k) / 2 + x1 * k, oy: pad + y1 * k, w, h };
 }
-const toX = (x) => tf.ox + x * tf.k, toY = (y) => tf.oy + y * tf.k;
+const toX = (x) => tf.ox - x * tf.k, toY = (y) => tf.oy - y * tf.k;
 function tracePoly(poly) {
   g.beginPath();
   poly.forEach((p, i) => (i ? g.lineTo(toX(p[0]), toY(p[1])) : g.moveTo(toX(p[0]), toY(p[1]))));
@@ -500,7 +501,7 @@ function nearestIndex(list, x, y) {
 }
 const mapXY = (ev) => {
   const r = canvas.getBoundingClientRect();
-  return [(ev.clientX - r.left - tf.ox) / tf.k, (ev.clientY - r.top - tf.oy) / tf.k];
+  return [(tf.ox - (ev.clientX - r.left)) / tf.k, (tf.oy - (ev.clientY - r.top)) / tf.k];
 };
 function traceAt(ev) {
   const [x, y] = mapXY(ev);
@@ -515,6 +516,7 @@ canvas.addEventListener("pointerdown", (ev) => {
   if (mode === "trace") {
     canvas.setPointerCapture(ev.pointerId);
     const [x, y] = mapXY(ev);
+    traceLine = [];   // display only: a new line hides the last one; /api/trace/save still covers every line since the last save
     addTracePoint(x, y);
     view();
     return;

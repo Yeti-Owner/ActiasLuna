@@ -13,7 +13,6 @@
   <div id="hdrInfo" class="muted"></div>
   <div class="spacer"></div>
   <span id="recBadge" class="badge"></span>
-  <button id="snapTog" class="quiet">Snap to trace</button>
   <button id="dimTog">3D view</button>
   <button id="modeTog" class="quiet">Advanced</button>
 </header>
@@ -66,7 +65,7 @@
       <div class="row"><button id="planBtn">Suggest board spots</button><button id="planUse" class="hidden">Use these</button><button id="planHide" class="hidden">Hide</button></div>
       <div id="planMsg" class="small"></div>
       <div class="row"><button id="saveLayout" class="primary">Save layout</button><button id="undoLayout">Undo changes</button><span id="layoutMsg" class="small"></span></div>
-      <p class="small muted">Measure from one room corner (0,0, top-left on the map) to each board with a tape or a phone
+      <p class="small muted">Measure from one room corner (0,0, bottom-right on the map) to each board with a tape or a phone
         measuring app. Six inches either way is fine. Saving rebuilds the radio map.</p>
     </div>
 
@@ -128,7 +127,7 @@
     <details class="step" id="stBoards">
       <summary><span class="ck"></span><b>Boards</b><span class="sum" id="boardsSum"></span></summary>
       <div id="sPlace"></div>
-      <div class="small muted">Drag a board on the map, or type its distance from the top-left corner (0, 0). Six inches
+      <div class="small muted">Drag a board on the map, or type its distance from the bottom-right corner (0, 0). Six inches
         either way is fine.</div>
       <div class="row"><button id="sSuggest">Suggest spots</button><button id="sPlanUse" class="hidden">Use these</button>
         <span class="spacer"></span><button id="sUndo" class="hidden">Undo</button><button id="sSave" class="primary hidden">Save</button></div>

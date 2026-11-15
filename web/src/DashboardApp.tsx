@@ -29,6 +29,18 @@ export interface ReceiverNode {
   reboots: number
 }
 
+// On-screen name: a random tag per device, fresh each page load and never derived from the MAC, so the audience view
+// shows people with no hint they are found through their phones. The debug tables still show MAC/IP.
+const TAG_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+const tags: Record<string, string> = {}
+function personLabel(mac: string): string {
+  while (!tags[mac]) {
+    const t = Array.from({ length: 3 }, () => TAG_CHARS[Math.floor(Math.random() * TAG_CHARS.length)]).join("")
+    if (!Object.values(tags).includes(t)) tags[mac] = t
+  }
+  return "Person " + tags[mac]
+}
+
 export interface TrackedPhone {
   mac: string
   mac_fmt: string
@@ -385,12 +397,12 @@ export default function DashboardApp() {
     }
   }
 
-  // Active people list (crowd takes precedence if on)
+  // Active people list (crowd takes precedence if on). Names are anonymous tags (personLabel), never MAC or nickname.
   const activePeople = useMemo(() => {
     if (state.crowd?.on && state.crowd.people) {
       return state.crowd.people.map(p => ({
         id: p.mac,
-        name: `Simulated #${p.mac.slice(-4)}`,
+        name: personLabel(p.mac),
         x: p.x,
         y: p.y,
         unc: 0.5,
@@ -406,7 +418,7 @@ export default function DashboardApp() {
         if (phone.est) {
           list.push({
             id: phone.mac,
-            name: phone.name || phone.mac_fmt,
+            name: personLabel(phone.mac),
             x: phone.est.x,
             y: phone.est.y,
             unc: phone.est.unc,
@@ -420,7 +432,7 @@ export default function DashboardApp() {
     if (state.body?.present) {
       list.push({
         id: 'device_free_body',
-        name: 'Person (no phone)',
+        name: 'Unknown person',
         x: state.body.x,
         y: state.body.y,
         unc: state.body.unc,
@@ -609,7 +621,7 @@ export default function DashboardApp() {
 
                 {activePeople.length === 0 ? (
                   <p className="text-xs text-white/60 py-6 text-center italic">
-                    No participants detected yet.<br />Join phone to DEMO-DONT JOIN.
+                    No one detected yet.
                   </p>
                 ) : (
                   <div className="space-y-3">

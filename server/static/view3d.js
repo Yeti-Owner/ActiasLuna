@@ -2,8 +2,9 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-// Presentation only: tracking is 2D. Layout (x, y) in metres maps to three.js (x, height, y), so the top-down camera
-// lines up with the 2D map. three.js (server/static/lib/three, r187) is bundled so the dashboard works offline.
+// Presentation only: tracking is 2D. Layout (x, y) in metres maps to three.js (x, height, y), so the cameras sit on the
+// low-y side looking toward +y, matching the 2D map's 180-degree turn (app.js fitView). three.js
+// (server/static/lib/three, r187) is bundled so the dashboard works offline.
 const FT = 0.3048;
 const PERSON_H = 4.0 * FT;
 const BOARD_H = 2.5 * FT;
@@ -98,7 +99,7 @@ class RoomView {
     const half = Math.max(6, span * 0.8), cam = this.sun.shadow.camera;
     Object.assign(cam, { left: -half, right: half, top: half, bottom: -half, far: Math.max(50, span * 4) });
     cam.updateProjectionMatrix();
-    this.home = { target: new THREE.Vector3(cx, 0.6, cz), pos: new THREE.Vector3(cx + span * 0.15, span * 1.15, cz + span * 1.25) };
+    this.home = { target: new THREE.Vector3(cx, 0.6, cz), pos: new THREE.Vector3(cx - span * 0.15, span * 1.15, cz - span * 1.25) };
     if (!this.cameraPlaced) { this.resetView(); this.cameraPlaced = true; }
 
     const grid = [];
@@ -193,7 +194,7 @@ class RoomView {
     if (!this.bounds) return;
     const b = this.bounds, cx = (b.x0 + b.x1) / 2, cz = (b.y0 + b.y1) / 2;
     this.controls.target.set(cx, 0, cz);
-    this.camera.position.set(cx, Math.max(b.x1 - b.x0, b.y1 - b.y0) * 1.9, cz + 0.001);
+    this.camera.position.set(cx, Math.max(b.x1 - b.x0, b.y1 - b.y0) * 1.9, cz - 0.001);
     this.controls.update();
   }
 
@@ -266,7 +267,7 @@ class RoomView {
       for (const m of [u.orb.material.color, u.orb.material.emissive, u.glow.material.color, u.post.material.color, u.disc.material.color, u.ring.material.color]) m.copy(shade);
       u.orb.material.emissiveIntensity = stale ? 0.15 : 0.9;
       u.disc.material.opacity = stale ? 0.06 : e.kind === "weak" ? 0.1 : 0.16;
-      const text = (p.name || "Phone " + p.mac_fmt.slice(-5)) + (stale ? " (not heard)" : e.kind === "weak" ? " (few boards)" : "");
+      const text = personLabel(p) + (stale ? " (not heard)" : e.kind === "weak" ? " (few boards)" : "");
       if (u.text !== text) {
         if (u.tag) g.remove(u.tag);
         u.tag = labelSprite(text, { size: 0.15 });

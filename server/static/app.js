@@ -21,8 +21,7 @@ const colors = {};
 // smoothly between 4 Hz snapshots.
 const shown = {};
 
-let snapTrace = true;
-try { simple = localStorage.lunaMode !== "debug"; show3d = localStorage.luna3d === "1"; snapTrace = localStorage.lunaSnap !== "0"; } catch (e) {}
+try { simple = localStorage.lunaMode !== "debug"; show3d = localStorage.luna3d === "1"; } catch (e) {}
 const remember = (k, v) => { try { localStorage[k] = v; } catch (e) {} };
 
 function colorFor(mac) {
@@ -69,7 +68,7 @@ function mergeBody(s) {
   const b = s.body;
   if (!b || !b.present) return;
   s.phones.push({
-    mac: "body", mac_fmt: "no phone", name: "Person (no phone)", associated: false, age: 0, per_node: {}, spark: [],
+    mac: "body", mac_fmt: "", name: "", associated: false, age: 0, per_node: {}, spark: [],
     trail: b.trail || [],
     est: { x: b.x, y: b.y, unc: b.unc, raw: [b.x, b.y, b.unc], kind: "estimated", receivers: b.links, mode: "device-free", age: 0, t: b.t },
   });
@@ -95,7 +94,6 @@ function mergeDecoys(s) {
 // and list entry show the latest traced point instead of the estimate, with no trail. p.snapped hides the overlay.
 const SNAP_FRESH_S = 1.0, SNAP_UNC_M = 0.15, TRACE_MARGIN_M = 1.0;
 function snapToTrace(s) {
-  if (!snapTrace) return;
   for (const p of s.phones) {
     const pts = p.trace?.pts;
     if (!pts?.length || !p.est || pts[pts.length - 1][0] < -SNAP_FRESH_S) continue;
@@ -105,12 +103,6 @@ function snapToTrace(s) {
     p.snapped = true;
   }
 }
-function applySnap() {
-  $("snapTog").textContent = snapTrace ? "Snap to trace: on" : "Snap to trace: off";
-  $("snapTog").title = "While a phone is traced, show its dot on the traced line (display only) instead of the estimate";
-}
-$("snapTog").onclick = () => { snapTrace = !snapTrace; remember("lunaSnap", snapTrace ? "1" : "0"); applySnap(); };
-applySnap();
 
 // 3D view: needs WebGL and the bundled three.js; report failures instead of showing a black box.
 function fail3d(msg) {
@@ -206,17 +198,27 @@ function whereText(p) {
   if (e.kind === "stale") return `not heard for ${age(p.age)}`;
   return `(${ft(e.x)}, ${ft(e.y)}) ft ± ${ft(e.unc)} ft` + (e.kind === "weak" ? " · few boards hear it" : "");
 }
-const displayName = (p) => p.name || "Phone " + p.mac_fmt.slice(-5);
+// On-screen name: a random tag per device, made fresh each page load and never derived from the MAC or nickname, so
+// the map, list and 3D show people with no hint they are found through their phones. Advanced keeps MAC/IP tables.
+const TAG_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", tags = {};
+function personLabel(p) {
+  if (p.mac === "body") return "Unknown person";
+  while (!tags[p.mac]) {
+    const t = Array.from({ length: 3 }, () => TAG_CHARS[Math.floor(Math.random() * TAG_CHARS.length)]).join("");
+    if (!Object.values(tags).includes(t)) tags[p.mac] = t;
+  }
+  return "Person " + tags[p.mac];
+}
 
 function renderSimple() {
-  const people = S.phones.slice().sort((a, b) => (a.name || a.mac).localeCompare(b.name || b.mac));
+  const people = S.phones.slice().sort((a, b) => personLabel(a).localeCompare(personLabel(b)));
   $("sPeople").innerHTML = people.map((p) => {
     const e = p.est, stale = e && e.kind === "stale";
     const certainty = e && !stale ? (e.unc < 1.5 * FT ? "pinpointed" : e.unc < 3 * FT ? "located" : "rough area") : "";
     const line = stale ? `not heard for ${age(p.age)}` : e ? `${placeName(e.x, e.y)} · ${certainty}, within ~${ft(e.unc, 0)} ft` : esc(whereText(p));
     return `<div class="person ${stale ? "stale" : ""}"><span class="sw" style="background:${colorFor(p.mac)}"></span>
-      <div><div class="nm">${esc(displayName(p))}</div><div class="wh">${line}</div></div></div>`;
-  }).join("") || '<div class="muted small">Nobody yet. Join a phone to the demo network.</div>';
+      <div><div class="nm">${esc(personLabel(p))}</div><div class="wh">${line}</div></div></div>`;
+  }).join("") || '<div class="muted small">Nobody detected yet.</div>';
 }
 
 const scanMatches = () => !!SCAN &&
@@ -297,7 +299,7 @@ function renderTables() {
   const cell = (q) => (q && q.r != null ? `${q.r}<span class=muted>/${q.rate}</span>` : "<span class=muted>—</span>");
   $("phonesT").innerHTML = "<tr><th>phone</th><th>where</th>" + ids.map((i) => `<th>${esc(nodeLabel(i))} dBm</th>`).join("") + "</tr>" +
     S.phones.map((p) => `<tr class="click ${selectedPhone === p.mac ? "sel" : ""}" data-mac="${esc(p.mac)}">
-      <td><span class="dot" style="background:${colorFor(p.mac)}"></span>${esc(p.name || p.mac_fmt.slice(-8))}</td><td>${esc(whereText(p))}</td>` +
+      <td><span class="dot" style="background:${colorFor(p.mac)}"></span>${esc(personLabel(p))}</td><td>${esc(whereText(p))}</td>` +
       ids.map((i) => { const q = p.per_node[i]; return `<td title="${q ? q.rate + " frames/s" : "none"}">${cell(q)}</td>`; }).join("") + "</tr>").join("") +
     (S.phones.length ? "" : `<tr><td colspan=${2 + ids.length} class="muted">no phones sending frames</td></tr>`);
   document.querySelectorAll("#phonesT tr.click").forEach((tr) => (tr.onclick = () => { selectedPhone = tr.dataset.mac; render(); }));
@@ -314,7 +316,7 @@ function renderTables() {
 function renderPhoneDetail() {
   const p = S.phones.find((q) => q.mac === selectedPhone);
   if (!p) { $("phoneDetail").innerHTML = ""; return; }
-  $("phoneDetail").innerHTML = `<div class="small"><b>${esc(p.name || "(no nickname)")}</b> <span class="mono">${p.mac_fmt}</span> ${esc(p.ip || "")}<br>${esc(whereText(p))}</div>
+  $("phoneDetail").innerHTML = `<div class="small"><b>${esc(personLabel(p))}</b> ${esc(p.name || "")} <span class="mono">${p.mac_fmt}</span> ${esc(p.ip || "")}<br>${esc(whereText(p))}</div>
     <canvas id="spark" width="360" height="110" style="height:110px;min-height:0"></canvas><div class="small muted">signal strength per board, last 30 s</div>`;
   const c = $("spark"), g = c.getContext("2d");
   const lo = -90, hi = -15;
@@ -335,7 +337,8 @@ function renderPhoneDetail() {
 }
 
 const canvas = $("map"), ctx = canvas.getContext("2d");
-// World (m) -> canvas px. Recomputed every draw so resizes and layout edits just work.
+// World (m) -> canvas px. Recomputed every draw so resizes and layout edits just work. Turned 180 degrees (largest x, y
+// at top-left) so the TV end of the room is at the top; phone.js fitView and view3d's cameras match.
 let view2d = { k: 50, ox: 20, oy: 20, w: 0, h: 0 };
 function fitView() {
   const r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
@@ -352,11 +355,11 @@ function fitView() {
   const minX = Math.min(0, ...xs), maxX = Math.max(...xs, 1), minY = Math.min(0, ...ys), maxY = Math.max(...ys, 1);
   const pad = 36, k = Math.max(5, Math.min((r.width - 2 * pad) / (maxX - minX), (r.height - 2 * pad) / (maxY - minY)));
   view2d = { k, w: r.width, h: r.height,
-    ox: pad - minX * k + (r.width - 2 * pad - (maxX - minX) * k) / 2,
-    oy: pad - minY * k + (r.height - 2 * pad - (maxY - minY) * k) / 2 };
+    ox: pad + maxX * k + (r.width - 2 * pad - (maxX - minX) * k) / 2,
+    oy: pad + maxY * k + (r.height - 2 * pad - (maxY - minY) * k) / 2 };
 }
-const toX = (x) => view2d.ox + x * view2d.k, toY = (y) => view2d.oy + y * view2d.k;
-const fromX = (px) => (px - view2d.ox) / view2d.k, fromY = (py) => (py - view2d.oy) / view2d.k;
+const toX = (x) => view2d.ox - x * view2d.k, toY = (y) => view2d.oy - y * view2d.k;
+const fromX = (px) => (view2d.ox - px) / view2d.k, fromY = (py) => (view2d.oy - py) / view2d.k;
 function tracePoly(poly) {
   ctx.beginPath();
   poly.forEach((p, i) => (i ? ctx.lineTo(toX(p[0]), toY(p[1])) : ctx.moveTo(toX(p[0]), toY(p[1]))));
@@ -501,7 +504,7 @@ function drawPerson(p, now) {
   ctx.beginPath(); ctx.arc(X, Y, 7, 0, 2 * Math.PI);
   if (e.kind === "estimated") { ctx.fillStyle = c; ctx.fill(); } else { ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.stroke(); }
   const note = stale ? ` (not heard ${age(p.age)})` : e.kind === "weak" ? " (few boards)" : "";
-  label((p.name || p.mac_fmt.slice(-5)) + note, X + 10, Y - 9, "12px sans-serif", "#e7eaf6");
+  label(personLabel(p) + note, X + 10, Y - 9, "12px sans-serif", "#e7eaf6");
   if (!stale && m.unc > VAGUE_UNC_M) label(placeName(m.x, m.y), X + 10, Y + 5, "11px sans-serif", "#a3abc8");
 }
 
@@ -514,8 +517,8 @@ function drawMap() {
   drawPlan();
   drawBoards();
   const now = performance.now() / 1000;
-  for (const p of S?.phones || []) drawRings(p);
-  for (const p of S?.phones || []) drawTrace(p);
+  // Per-board rings and traced truth are accuracy debugging: Advanced only. The phone shows its own traced line.
+  if (!simple) for (const p of S?.phones || []) { drawRings(p); drawTrace(p); }
   for (const p of S?.phones || []) drawPerson(p, now);
   if (placing) label(`click the map where board ${nodeLabel(placing.id)} is`, 10, 18, "13px sans-serif", "#e6b24c");
 }
